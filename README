@@ -9,14 +9,47 @@
 
 ## Project Structure
 
-The project is structured as a monorepo with distinct services:
+The project is structured as a monorepo with distinct services. Below is a more detailed breakdown of the intended directory structure:
 
-```
+```plaintext
 /
-├── backend/         # Node.js API Server (handles core logic, auth, API routes)
-├── frontend/        # Web client (e.g., React, Vue, Angular)
-├── ml/              # Python ML Service (TensorFlow for OCR, document analysis)
-└── .github/         # GitHub-specific files (workflows, dependabot)
+├── backend/
+│   ├── src/
+│   │   ├── api/         # API routes (e.g., Express routes)
+│   │   ├── config/      # Configuration files (db, auth)
+│   │   ├── controllers/ # Route handlers
+│   │   ├── middleware/  # Authentication (JWT), error handling
+│   │   ├── models/      # Database schemas/models (SQL)
+│   │   └── services/    # Business logic
+│   ├── .env.example
+│   └── package.json
+│
+├── frontend/
+│   ├── public/
+│   │   └── index.html
+│   ├── src/
+│   │   ├── assets/      # Images, fonts, etc.
+│   │   ├── components/  # Reusable UI components
+│   │   ├── pages/       # Page-level components
+│   │   ├── services/    # API communication
+│   │   └── App.js       # Main application component
+│   ├── .env.example
+│   └── package.json
+│
+├── ml/
+│   ├── notebooks/       # Jupyter notebooks for EDA
+│   ├── src/
+│   │   ├── ocr/         # OCR logic
+│   │   ├── signature/   # Signature verification logic
+│   │   └── anomaly/     # Anomaly detection logic
+│   ├── .env.example
+│   └── requirements.txt
+│
+├── .github/
+│   └── workflows/       # CI/CD workflows
+│
+├── .gitignore
+└── README.md
 ```
 
 ## Getting Started
