@@ -5,7 +5,20 @@
 
 version: 2
 updates:
-  - package-ecosystem: "" # See documentation for possible values
-    directory: "/" # Location of package manifests
+  # Maintain dependencies for npm (frontend)
+  - package-ecosystem: "npm"
+    directory: "/frontend" # Location of package.json
+    schedule:
+      interval: "weekly"
+
+  # Maintain dependencies for npm (backend)
+  - package-ecosystem: "npm"
+    directory: "/backend" # Location of package.json
+    schedule:
+      interval: "weekly"
+
+  # Maintain dependencies for pip (ML service)
+  - package-ecosystem: "pip"
+    directory: "/ml" # Location of requirements.txt
     schedule:
       interval: "weekly"
