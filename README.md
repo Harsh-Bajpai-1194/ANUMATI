@@ -49,7 +49,10 @@ The project is structured as a monorepo with distinct services. Below is a more 
 │   └── workflows/       # CI/CD workflows
 │
 ├── .gitignore
+└── CHANGELOG
 └── README.md
+└── requirements.txt
+└── VERSION
 ```
 
 ## Getting Started
