@@ -1,6 +1,6 @@
-# ANUMATI - AI supported AICTE Approval process portal
-
-## Project Overview
+# ANUMATI - AI supported AICTE Approval process portal v1.0.0  
+  
+## Project Overview  
 
 * **Core, server, API, security, authentication:** This portal requires a highly secure, role-based backend architecture. You will need to build robust APIs to handle heavy document uploads and implement strict authentication (like JWT) because you are dealing with official government and institutional data.
 * **SQL and MongoDB both:** This is the perfect use case for a hybrid database approach. You can use SQL for structured, relational data (user accounts, college hierarchies, strict approval statuses) and MongoDB to store unstructured, dynamic data (varied institutional application forms, JSON logs, and AI evaluation outputs).
