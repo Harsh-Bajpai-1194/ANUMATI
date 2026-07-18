@@ -1,12 +1,14 @@
 import React from 'react';
-import PdfUploadComponent from './PdfUploadComponent';
+// 1. Import your PDF component from the pages directory
+import PdfUploadComponent from './pages/PdfUploadComponent';
 
-function App() {
+const App = () => {
   return (
     <div>
+      {/* 2. Render the component to the screen */}
       <PdfUploadComponent />
     </div>
   );
-}
+};
 
 export default App;

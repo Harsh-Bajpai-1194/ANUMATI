@@ -69,7 +69,7 @@ jobs:
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   issue_number: issue.number,
-                  body: `⏳ **Time's up!** It has been over 24 hours since this issue was claimed, and no Pull Request has been linked.\n\nI am automatically unassigning this issue so others in the CodeX Club can have a chance to work on it! If you're still working on it, feel free to \`/claim\` it again. 🐍`
+                  body: `⏳ **Time's up!** It has been over 24 hours since this issue was claimed, and no Pull Request has been linked.\n\nI am automatically unassigning this issue so other people can have a chance to work on it! If you're still working on it, feel free to \`/claim\` it again. 🐍`
                 });
               }
             }
