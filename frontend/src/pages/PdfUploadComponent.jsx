@@ -131,6 +131,18 @@ const PdfUploadComponent = () => {
               </li>
             ))}
           </ul>
+          <a href="/dashboard.html" style={{ textDecoration: 'none' }}>
+            <button
+              style={{
+                ...styles.button,
+                marginTop: '20px',
+                backgroundColor: '#28a745',
+                cursor: 'pointer',
+              }}
+            >
+              Next
+            </button>
+          </a>
         </div>
       )}
     </div>
