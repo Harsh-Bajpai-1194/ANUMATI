@@ -1,0 +1,109 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  applicant
+  evaluator
+  admin
+}
+
+enum AppStatus {
+  draft
+  submitted
+  under_review
+  returned_for_correction
+  approved
+  rejected
+}
+
+enum ApplicationType {
+  new_institution
+  extension_of_approval
+  new_program
+  increase_in_intake
+  closure
+  hibernation
+}
+
+model User {
+  userId        String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("user_id")
+  fullName      String       @map("full_name")
+  phone         String?      @map("phone")
+  email         String       @unique
+  passwordHash  String       @map("password_hash")
+  role          UserRole     @default(applicant)
+  institutionId String?      @db.Uuid @map("institution_id")
+  institution   Institution? @relation("UserInstitution", fields: [institutionId], references: [institutionId])
+
+  // Inverse relations
+  primaryContactFor Institution[]         @relation("PrimaryContact")
+  submittedApplications Application[]      @relation("ApplicationSubmitter")
+  statusLogs    ApplicationStatusLog[]
+
+  createdAt     DateTime     @default(now()) @map("created_at")
+
+  @@map("users")
+}
+
+model Institution {
+  institutionId       String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("institution_id")
+  parentInstitutionId String?        @db.Uuid @map("parent_institution_id")
+  parentInstitution   Institution?   @relation("SubInstitutions", fields: [parentInstitutionId], references: [institutionId])
+  subInstitutions     Institution[]  @relation("SubInstitutions")
+
+  name                String
+  primaryContactUserId String?       @db.Uuid @map("primary_contact_user_id")
+  primaryContactUser  User?          @relation("PrimaryContact", fields: [primaryContactUserId], references: [userId])
+
+  users               User[]         @relation("UserInstitution")
+  applications        Application[]
+
+  createdAt           DateTime       @default(now()) @map("created_at")
+
+  @@map("institutions")
+}
+
+model Application {
+  applicationId       String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("application_id")
+  applicationType     ApplicationType        @map("application_type")
+  institutionId       String                 @db.Uuid @map("institution_id")
+  institution         Institution            @relation(fields: [institutionId], references: [institutionId])
+
+  academicYear        String                 @map("academic_year")
+  currentStatus       AppStatus              @default(draft) @map("current_status")
+  mongoApplicationRef String?                @map("mongo_application_ref")
+
+  submittedBy         String?                @db.Uuid @map("submitted_by")
+  submitter           User?                  @relation("ApplicationSubmitter", fields: [submittedBy], references: [userId])
+
+  statusLogs          ApplicationStatusLog[]
+  createdAt           DateTime               @default(now()) @map("created_at")
+
+  @@index([institutionId])
+  @@map("applications")
+  @@unique([institutionId, academicYear, applicationType])
+}
+
+model ApplicationStatusLog {
+  logId                String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("log_id")
+  applicationId        String      @db.Uuid @map("application_id")
+  application          Application @relation(fields: [applicationId], references: [applicationId], onDelete: Cascade)
+
+  oldStatus            AppStatus?  @map("old_status")
+  newStatus            AppStatus   @map("new_status")
+
+  changedBy            String?     @db.Uuid @map("changed_by")
+  user                 User?       @relation(fields: [changedBy], references: [userId])
+
+  mongoAiEvaluationRef String?     @map("mongo_ai_evaluation_ref")
+  changedAt            DateTime    @default(now()) @map("changed_at")
+
+  @@index([applicationId])
+  @@map("application_status_logs")
+}

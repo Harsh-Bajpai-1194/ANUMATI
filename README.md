@@ -1,6 +1,6 @@
-# ANUMATI - AI supported AICTE Approval process portal v1.0.0  
-  
-## Project Overview  
+# ANUMATI - AI supported AICTE Approval process portal v1.0.0
+
+## Project Overview
 
 * **Core, server, API, security, authentication:** This portal requires a highly secure, role-based backend architecture. You will need to build robust APIs to handle heavy document uploads and implement strict authentication (like JWT) because you are dealing with official government and institutional data.
 * **SQL and MongoDB both:** This is the perfect use case for a hybrid database approach. You can use SQL for structured, relational data (user accounts, college hierarchies, strict approval statuses) and MongoDB to store unstructured, dynamic data (varied institutional application forms, JSON logs, and AI evaluation outputs).
@@ -14,26 +14,47 @@ The project is structured as a monorepo with distinct services. Below is a more 
 ```plaintext
 /
 ├── backend/
+|   ├── api/         # API routes (e.g., Express routes)
+│   ├── models/      # Database schemas/models (SQL)
+│   ├── prisma/
+|   |   ├── migrations/
+|   |   └── schema.prisma
+|   |
+│   ├── scripts/
+|   |   └── test-db.js
+|   |
 │   ├── src/
-│   │   ├── api/         # API routes (e.g., Express routes)
 │   │   ├── config/      # Configuration files (db, auth)
+|   │   │   └── db.js
+|   |   |
 │   │   ├── controllers/ # Route handlers
+│   │   ├── generated/
 │   │   ├── middleware/  # Authentication (JWT), error handling
-│   │   ├── models/      # Database schemas/models (SQL)
-│   │   └── services/    # Business logic
+│   │   ├── services/    # Business logic
+│   |   └── server.js
+|   |
 │   ├── .env.example
-│   └── package.json
+│   ├── package-lock.json
+│   ├── package.json
+│   └── prisma.config.ts
 │
 ├── frontend/
 │   ├── public/
+│   │   ├── dashboard.html
 │   │   └── index.html
+|   |
 │   ├── src/
 │   │   ├── assets/      # Images, fonts, etc.
 │   │   ├── components/  # Reusable UI components
 │   │   ├── pages/       # Page-level components
 │   │   ├── services/    # API communication
-│   │   └── App.js       # Main application component
-│   ├── .env.example
+│   │   ├── App.js       # Main application component
+│   │   ├── App.jsx
+│   │   └── index.js
+|   |
+│   ├── home.html
+│   ├── package-lock.json
+│   ├── webpack.config.js
 │   └── package.json
 │
 ├── ml/
@@ -42,17 +63,18 @@ The project is structured as a monorepo with distinct services. Below is a more 
 │   │   ├── ocr/         # OCR logic
 │   │   ├── signature/   # Signature verification logic
 │   │   └── anomaly/     # Anomaly detection logic
-│   ├── .env.example
+|   |
+│   ├── ml.py
 │   └── requirements.txt
 │
 ├── .github/
 │   └── workflows/       # CI/CD workflows
 │
 ├── .gitignore
-└── CHANGELOG
+└── CHANGELOG.md
 └── README.md
-└── requirements.txt
-└── VERSION
+└── SECURITY.md
+└── VERSION.md
 ```
 
 ## Getting Started
@@ -74,7 +96,20 @@ Ensure you have the following installed on your local machine:
     ```
 
 2.  **Set up Databases:**
-    This project uses SQL (e.g., PostgreSQL) and MongoDB. The easiest way to run them is via Docker. You can create a `docker-compose.yml` file to manage them.
+    1.  Make sure you have PostgreSQL installed and running locally (or via Docker).
+    2.  Copy the example environment variables file and configure your credentials:
+        ```bash
+        cp .env.example .env
+        ```
+    3.  Update DATABASE_URL and MONGODB_URI in .env with your local connection strings.
+    4.  Run the Prisma migrations to set up the PostgreSQL schema:
+        ```bash
+        npx prisma migrate dev
+        ```
+    5.  Generate the Prisma client:
+        ```bash
+        npx prisma generate
+        ```
 
 3.  **Install Dependencies:**
     Install dependencies for each service from the root directory.
