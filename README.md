@@ -15,7 +15,6 @@ The project is structured as a monorepo with distinct services. Below is a more 
 /
 ├── backend/
 |   ├── api/         # API routes (e.g., Express routes)
-│   ├── models/      # Database schemas/models (SQL)
 │   ├── prisma/
 |   |   ├── migrations/
 |   |   └── schema.prisma
@@ -25,12 +24,16 @@ The project is structured as a monorepo with distinct services. Below is a more 
 |   |
 │   ├── src/
 │   │   ├── config/      # Configuration files (db, auth)
-|   │   │   └── db.js
+│   │   │   ├── db.js        # Prisma client (SQL)
+│   │   │   └── mongo.js     # MongoDB connection setup
 |   |   |
 │   │   ├── controllers/ # Route handlers
 │   │   ├── generated/
 │   │   ├── middleware/  # Authentication (JWT), error handling
 │   │   ├── services/    # Business logic
+|   │   ├── models/      # MongoDB Schemas
+|   |   │   ├── AiEvaluation.js
+|   │   |   └── DynamicApplicationForm.js
 │   |   └── server.js
 |   |
 │   ├── .env.example
@@ -86,6 +89,7 @@ Ensure you have the following installed on your local machine:
 *   [Python](https://www.python.org/) (v3.9.x or higher)
 *   [Docker](https://www.docker.com/products/docker-desktop/) (for running databases)
 *   [Git](https://git-scm.com/)
+*   [MongoDB](https://www.mongodb.com/try/download/community) (Local installation via Compass/Docker, or a free cloud cluster via MongoDB Atlas)
 
 ### Installation & Setup
 
@@ -96,19 +100,16 @@ Ensure you have the following installed on your local machine:
     ```
 
 2.  **Set up Databases:**
-    1.  Make sure you have PostgreSQL installed and running locally (or via Docker).
-    2.  Copy the example environment variables file and configure your credentials:
+    1.  Ensure you have **PostgreSQL** running locally (or via Docker) for relational data.
+    2.  Ensure you have **MongoDB** running locally, or create a free shared cluster on MongoDB Atlas for unstructured data.
+    3.  Copy the example environment variables file:
         ```bash
-        cp .env.example .env
+        cp backend/.env.example backend/.env
         ```
-    3.  Update DATABASE_URL and MONGODB_URI in .env with your local connection strings.
-    4.  Run the Prisma migrations to set up the PostgreSQL schema:
+    4.  Update `DATABASE_URL` (PostgreSQL) and `MONGODB_URI` (MongoDB) in `backend/.env` with your connection strings.
+    5.  Run the Prisma migrations to set up the PostgreSQL schema:
         ```bash
         npx prisma migrate dev
-        ```
-    5.  Generate the Prisma client:
-        ```bash
-        npx prisma generate
         ```
 
 3.  **Install Dependencies:**
@@ -126,3 +127,5 @@ Ensure you have the following installed on your local machine:
 
 4.  **Environment Variables:**
     Each service (`backend`, `frontend`, `ml`) will require its own `.env` file for configuration. You should create `.env.example` files in each directory to document the required variables.
+
+**Note on Server Execution:** The backend server maintains active connections to both PostgreSQL and MongoDB simultaneously. It includes a graceful shutdown protocol. To stop the server cleanly and disconnect the databases without hanging ports, always use `Ctrl+C`.
