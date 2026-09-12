@@ -22,7 +22,7 @@
     "cors": "^2.8.6",
     "express": "^5.2.1",
     "helmet": "^8.3.0",
-    "mongoose": "^9.9.4",
+    "mongoose": "^9.9.5",
     "pg": "^8.x"
   },
   "devDependencies": {
