@@ -1,4 +1,6 @@
 import express from 'express';
+import path from 'path';
+import apiRoutes from './controllers/routes.js';
 import dotenv from 'dotenv';
 import helmet from 'helmet';
 import cors from 'cors';
@@ -14,6 +16,12 @@ const port = process.env.PORT || 3000;
 app.use(helmet());
 app.use(cors({ origin: process.env.FRONTEND_URL }));
 app.use(express.json({ limit: '2mb' }));
+
+// Serve uploaded files statically
+app.use('/uploads', express.static(path.resolve('uploads'))); 
+
+// Mount API routes.
+app.use('/api', apiRoutes);
 
 app.get('/', (req, res) => {
   res.send('Hello from the ANUMATI backend!');
