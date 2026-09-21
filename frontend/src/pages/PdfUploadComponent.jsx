@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import { uploadPdfDocument } from '../services/api';
 
 const PdfUploadComponent = () => {
   const [selectedFile, setSelectedFile] = useState(null);
@@ -6,6 +7,7 @@ const PdfUploadComponent = () => {
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [isHovered, setIsHovered] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   
   const fileInputRef = useRef(null);
 
@@ -27,7 +29,7 @@ const PdfUploadComponent = () => {
     }
 
     if (file.size > MAX_FILE_SIZE) {
-      setErrorMessage('Size exceed. Maximum allowed file size is 15MB.');
+      setErrorMessage('Size exceeded. Maximum allowed file size is 15MB.');
       resetInput();
       return;
     }
@@ -35,21 +37,36 @@ const PdfUploadComponent = () => {
   };
 
   const handleUpload = async () => {
-    if (!selectedFile) return;
+    if (!selectedFile || isUploading) return;
 
-    try {      
-      console.log('Uploading:', selectedFile.name);
+    try {
+      setIsUploading(true);
+      setErrorMessage('');
+      setSuccessMessage('');
+
+      // Send file to backend
+      const response = await uploadPdfDocument(selectedFile);
       
-      setUploadedFiles((prevFiles) => [...prevFiles, selectedFile]);
+      // Add server-confirmed document info to the uploaded list
+      setUploadedFiles((prevFiles) => [
+        ...prevFiles, 
+        {
+          name: response.data.originalName,
+          size: response.data.sizeBytes,
+          documentId: response.data.documentId,
+          uploadedAt: response.data.uploadedAt
+        }
+      ]);
       
-      setSuccessMessage(`${selectedFile.name} uploaded successfully!`);
-      
-      setTimeout(() => setSuccessMessage(''), 3000);
+      setSuccessMessage(`"${response.data.originalName}" uploaded successfully!`);
+      setTimeout(() => setSuccessMessage(''), 4000);
       
       setSelectedFile(null);
       resetInput();
     } catch (error) {
-      setErrorMessage('Failed to upload file. Please try again.');
+      setErrorMessage(error.message || 'Failed to upload file. Please check your backend connection.');
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -73,7 +90,9 @@ const PdfUploadComponent = () => {
         style={{
           ...styles.uploadBox,
           borderColor: isHovered ? '#007bff' : '#ccc',
-          backgroundColor: isHovered ? '#f1f8ff' : '#fafafa'
+          backgroundColor: isHovered ? '#f1f8ff' : '#fafafa',
+          opacity: isUploading ? 0.6 : 1,
+          pointerEvents: isUploading ? 'none' : 'auto'
         }}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
@@ -86,6 +105,7 @@ const PdfUploadComponent = () => {
           onChange={handleFileChange}
           ref={fileInputRef}
           style={styles.input}
+          disabled={isUploading}
         />
       </div>
 
@@ -101,14 +121,14 @@ const PdfUploadComponent = () => {
 
       <button
         onClick={handleUpload}
-        disabled={!selectedFile}
+        disabled={!selectedFile || isUploading}
         style={{
           ...styles.button,
-          backgroundColor: selectedFile ? '#007bff' : '#cccccc',
-          cursor: selectedFile ? 'pointer' : 'not-allowed',
+          backgroundColor: (!selectedFile || isUploading) ? '#cccccc' : '#007bff',
+          cursor: (!selectedFile || isUploading) ? 'not-allowed' : 'pointer',
         }}
       >
-        Upload File
+        {isUploading ? 'Uploading to Server...' : 'Upload File'}
       </button>
 
       {uploadedFiles.length > 0 && (
