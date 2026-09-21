@@ -14,7 +14,7 @@ const port = process.env.PORT || 3000;
 
 // Middleware
 app.use(helmet());
-app.use(cors({ origin: process.env.FRONTEND_URL }));
+app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:8080' }));
 app.use(express.json({ limit: '2mb' }));
 
 // Serve uploaded files statically
