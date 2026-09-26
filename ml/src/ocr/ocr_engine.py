@@ -1,6 +1,8 @@
+import io
 import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Union, Any
+from PIL import Image
 
 from src.config import TEXT_FOLDER
 from src.preprocessing.pdf_reader import PDFReader
@@ -8,7 +10,6 @@ from .image_preprocessor import ImagePreprocessor
 
 logger = logging.getLogger("anumati-ml.ocr_engine")
 
-# Check if pytesseract is available in environment
 try:
     import pytesseract
     PYTESSERACT_AVAILABLE = True
@@ -34,32 +35,9 @@ class OCREngine:
         dpi: int = 300,
         preprocessor: Optional[ImagePreprocessor] = None
     ):
-        """
-        Parameters:
-            min_words_threshold (int): Minimum words required to consider a page a digital PDF.
-                                      Pages with fewer words trigger OCR image processing.
-            dpi (int): DPI resolution for page rendering if OCR fallback is needed.
-            preprocessor (Optional[ImagePreprocessor]): Preprocessor instance for OCR images.
-        """
         self.min_words_threshold = min_words_threshold
         self.dpi = dpi
         self.preprocessor = preprocessor or ImagePreprocessor()
-
-    def _run_tesseract(self, image_path: Path) -> str:
-        """Runs Tesseract OCR if available, else returns empty string."""
-        if not PYTESSERACT_AVAILABLE:
-            logger.warning(
-                "pytesseract is not installed; scanned page OCR fallback is skipped."
-            )
-            return ""
-
-        try:
-            processed_img = self.preprocessor.preprocess(image_path)
-            text = pytesseract.image_to_string(processed_img)
-            return text.strip()
-        except Exception as exc:
-            logger.warning(f"Tesseract OCR failed on {image_path}: {exc}")
-            return ""
 
     def process_document(
         self,
@@ -68,17 +46,7 @@ class OCREngine:
         save_text_file: bool = True
     ) -> Dict[str, Any]:
         """
-        Extract text from all pages of the document using the hybrid strategy.
-
-        Returns structured summary containing:
-            - document_name
-            - total_pages
-            - total_words
-            - total_characters
-            - extraction_method ("digital_text_layer", "ocr_fallback", or "hybrid")
-            - text_file_path (Path where text is saved)
-            - pages (list of per-page text & metrics)
-            - full_text (consolidated string)
+        Extract text from all pages using the hybrid strategy.
         """
         if isinstance(reader_or_source, PDFReader):
             reader = reader_or_source
@@ -94,47 +62,59 @@ class OCREngine:
         used_digital = False
         used_ocr = False
 
-        # Open the PDF document
         with reader.open_pdf() as pdf:
             for page_idx in range(total_pages):
                 page = pdf[page_idx]
                 page_number = page_idx + 1
 
-                # 1. Try digital text extraction
-                page_text = page.get_text().strip()
-                words = len(page_text.split())
+                # 1. Digital text extraction
+                digital_text = page.get_text().strip()
+                words = len(digital_text.split())
+                final_page_text = digital_text
                 method = "digital_text_layer"
 
-                # 2. If text is sparse, trigger OCR fallback
+                # 2. If text is sparse and OCR is available, attempt OCR with full boundary guard
                 if words < self.min_words_threshold:
-                    logger.info(
-                        f"Page {page_number} of '{reader.document_name}' has low text density ({words} words). Attempting OCR..."
-                    )
-                    pix = page.get_pixmap(dpi=self.dpi)
-                    # Convert pixmap to PIL Image
-                    from PIL import Image
-                    import io
-                    img = Image.open(io.BytesIO(pix.tobytes("png")))
-                    
                     ocr_text = ""
                     if PYTESSERACT_AVAILABLE:
-                        processed_img = self.preprocessor.preprocess(img)
                         try:
+                            pix = page.get_pixmap(dpi=self.dpi)
+                            img = Image.open(io.BytesIO(pix.tobytes("png")))
+                            processed_img = self.preprocessor.preprocess(img)
                             ocr_text = pytesseract.image_to_string(processed_img).strip()
                         except Exception as exc:
-                            logger.warning(f"OCR execution failed on page {page_number}: {exc}")
+                            logger.warning(
+                                f"OCR pipeline failed on page {page_number} of '{reader.document_name}': {exc}"
+                            )
 
-                    if len(ocr_text.split()) > words:
-                        page_text = ocr_text
-                        words = len(page_text.split())
-                        method = "ocr_fallback"
-                        used_ocr = True
+                    # Preserve digital text tokens while integrating OCR
+                    if ocr_text:
+                        ocr_words = len(ocr_text.split())
+                        if ocr_words > words:
+                            # Combine distinct digital text with OCR text if digital text wasn't already in OCR
+                            if digital_text and digital_text not in ocr_text:
+                                final_page_text = f"{digital_text}\n\n{ocr_text}".strip()
+                            else:
+                                final_page_text = ocr_text
+                            words = len(final_page_text.split())
+                            method = "ocr_fallback"
+                            used_ocr = True
+                        else:
+                            final_page_text = digital_text
+                            method = "digital_text_layer" if words > 0 else "empty_or_unreadable"
+                            if words > 0:
+                                used_digital = True
                     else:
-                        used_digital = True
+                        # No OCR text available
+                        if words > 0:
+                            method = "digital_text_layer"
+                            used_digital = True
+                        else:
+                            method = "empty_or_unreadable"
                 else:
                     used_digital = True
 
-                chars = len(page_text)
+                chars = len(final_page_text)
                 total_words += words
                 total_chars += chars
 
@@ -143,23 +123,26 @@ class OCREngine:
                     "word_count": words,
                     "char_count": chars,
                     "method": method,
-                    "text": page_text
+                    "text": final_page_text,
+                    "digital_text": digital_text,
                 })
 
-        # Determine overall extraction method
+        # Overall extraction classification
         if used_digital and used_ocr:
             overall_method = "hybrid"
         elif used_ocr:
             overall_method = "ocr_fallback"
-        else:
+        elif used_digital:
             overall_method = "digital_text_layer"
+        else:
+            overall_method = "unreadable_or_empty"
 
         full_text = "\n\n".join([p["text"] for p in pages_result if p["text"]])
 
-        # Save extracted text to outputs/text/<doc_stem>.txt
+        # Save extracted text to isolated path: outputs/text/<doc_stem>/extracted_text.txt
         text_file_path = None
         if save_text_file:
-            text_file_path = TEXT_FOLDER / f"{doc_stem}.txt"
+            text_file_path = TEXT_FOLDER / doc_stem / "extracted_text.txt"
             text_file_path.parent.mkdir(parents=True, exist_ok=True)
             text_file_path.write_text(full_text, encoding="utf-8")
             logger.info(f"Saved extracted text to: {text_file_path}")
@@ -170,7 +153,8 @@ class OCREngine:
             "total_words": total_words,
             "total_characters": total_chars,
             "extraction_method": overall_method,
+            "ocr_engine_available": PYTESSERACT_AVAILABLE,
             "text_file_path": str(text_file_path) if text_file_path else None,
             "pages": pages_result,
-            "full_text": full_text
+            "full_text": full_text,
         }
