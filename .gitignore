@@ -27,3 +27,26 @@ yarn-error.log*
 *.njsproj
 *.sln
 .DS_Store
+
+# Python & Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+.pytest_cache/
+
+# Uploads & Runtime Artifacts
+backend/uploads/*
+!backend/uploads/.gitkeep
+ml/uploads/*
+!ml/uploads/.gitkeep
+ml/outputs/images/*
+!ml/outputs/images/.gitkeep
+ml/outputs/text/*
+!ml/outputs/text/.gitkeep
+ml/outputs/reports/*
+!ml/outputs/reports/.gitkeep
