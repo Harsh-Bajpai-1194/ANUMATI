@@ -1,7 +1,11 @@
 import argparse
+import logging
 from pathlib import Path
 from src.preprocessing.pdf_reader import PDFReader, PDFProcessingError
 from src.config import UPLOAD_FOLDER
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+logger = logging.getLogger("anumati-ml.cli")
 
 
 def parse_args():
@@ -19,6 +23,11 @@ def parse_args():
         type=int,
         default=300,
         help="Resolution in DPI for page rendering (default: 300)",
+    )
+    parser.add_argument(
+        "--format",
+        default="png",
+        help="Output image format (png, jpeg, jpg). Default: png",
     )
     parser.add_argument(
         "--pages",
@@ -49,7 +58,7 @@ def main():
     try:
         pdf_path = resolve_pdf_path(args.pdf)
     except FileNotFoundError as exc:
-        print(f"Error: {exc}")
+        logger.error(str(exc))
         return 1
 
     try:
@@ -68,10 +77,16 @@ def main():
 
             print("\n--- Page Dimensions ---")
             for p in reader.get_page_dimensions():
-                print(f"  Page {p['page_number']}: {p['width']} x {p['height']} pt ({p['orientation']})")
+                print(
+                    f"  Page {p['page_number']}: {p['width']} x {p['height']} pt ({p['orientation']})"
+                )
 
-        print(f"\nRendering images (DPI: {args.dpi})...")
-        images = reader.extract_images(dpi=args.dpi, pages=args.pages)
+        print(f"\nRendering images (DPI: {args.dpi}, Format: {args.format})...")
+        images = reader.extract_images(
+            dpi=args.dpi,
+            image_format=args.format,
+            pages=args.pages,
+        )
 
         print(f"Successfully generated {len(images)} image(s):")
         for i, img in enumerate(images, start=1):
@@ -81,10 +96,10 @@ def main():
         return 0
 
     except PDFProcessingError as err:
-        print(f"PDF Processing Error: {err}")
+        logger.error(f"PDF Processing Error: {err}")
         return 1
-    except Exception as exc:
-        print(f"Unexpected error: {exc}")
+    except Exception:
+        logger.exception("Unexpected failure while processing PDF")
         return 1
 
 

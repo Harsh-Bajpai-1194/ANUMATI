@@ -2,11 +2,17 @@ import io
 import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Union, Sequence
-import fitz  # PyMuPDF
+
+try:
+    import pymupdf as fitz
+except ImportError:
+    import fitz
 
 from src.config import IMAGE_FOLDER
 
 logger = logging.getLogger("anumati-ml.pdf_reader")
+
+SUPPORTED_IMAGE_FORMATS = {"png", "jpeg", "jpg"}
 
 
 class PDFProcessingError(Exception):
@@ -103,8 +109,12 @@ class PDFReader:
         """
         with self.open_pdf() as pdf:
             meta = pdf.metadata or {}
-            file_size = self.pdf_path.stat().st_size if self.pdf_path and self.pdf_path.exists() else len(self.stream_bytes or b"")
-            
+            file_size = (
+                self.pdf_path.stat().st_size
+                if self.pdf_path and self.pdf_path.exists()
+                else len(self.stream_bytes or b"")
+            )
+
             return {
                 "document_name": self.document_name,
                 "total_pages": len(pdf),
@@ -136,7 +146,7 @@ class PDFReader:
                     "width": round(width, 2),
                     "height": round(height, 2),
                     "orientation": orientation,
-                    "aspect_ratio": round(width / height, 3) if height > 0 else 0.0
+                    "aspect_ratio": round(width / height, 3) if height > 0 else 0.0,
                 })
         return dimensions
 
@@ -172,28 +182,37 @@ class PDFReader:
         Returns:
             List[Path]: Paths of saved image files.
         """
+        fmt = image_format.lower().lstrip(".")
+        if fmt not in SUPPORTED_IMAGE_FORMATS:
+            raise PDFProcessingError(
+                f"Unsupported image format: '{image_format}'. Supported formats are: {', '.join(sorted(SUPPORTED_IMAGE_FORMATS))}"
+            )
+
         target_dir = Path(output_dir) if output_dir else (IMAGE_FOLDER / self.document_stem)
         target_dir.mkdir(parents=True, exist_ok=True)
 
         saved_images = []
-        fmt = image_format.lower().lstrip(".")
 
         with self.open_pdf() as pdf:
             selected_indices = list(pages) if pages is not None else list(range(len(pdf)))
 
             for page_idx in selected_indices:
                 if page_idx < 0 or page_idx >= len(pdf):
-                    logger.warning(f"Skipping out-of-range page index {page_idx} for '{self.document_name}'")
+                    logger.warning(
+                        f"Skipping out-of-range page index {page_idx} for '{self.document_name}'"
+                    )
                     continue
 
                 page = pdf[page_idx]
                 page_number = page_idx + 1
                 image_path = target_dir / f"page_{page_number}.{fmt}"
 
-                # Render page at high quality
+                # Render page at specified resolution
                 pix = page.get_pixmap(dpi=dpi)
                 pix.save(str(image_path))
                 saved_images.append(image_path)
 
-        logger.info(f"Rendered {len(saved_images)} page image(s) for '{self.document_name}' in {target_dir}")
+        logger.info(
+            f"Rendered {len(saved_images)} page image(s) for '{self.document_name}' in {target_dir}"
+        )
         return saved_images
