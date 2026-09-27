@@ -198,3 +198,4 @@ class OCREngine:
             "pages": pages_result,
             "full_text": full_text,
         }
+    
