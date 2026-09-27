@@ -49,7 +49,8 @@ class ImagePreprocessor:
         if isinstance(image_source, (str, Path)):
             img = Image.open(str(image_source))
         elif isinstance(image_source, Image.Image):
-            img = image_source
+            # Explicit copy guarantees caller's original image instance is never modified
+            img = image_source.copy()
         else:
             raise TypeError(f"Unsupported image source type: {type(image_source)}")
 
