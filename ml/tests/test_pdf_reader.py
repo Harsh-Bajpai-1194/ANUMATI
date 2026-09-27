@@ -118,3 +118,10 @@ def test_pdf_reader_empty_stream():
     reader = PDFReader(b"", document_name="empty.pdf")
     with pytest.raises(CorruptedPDFError):
         reader.open_pdf()
+
+def test_document_stem_rejects_reserved_path():
+    """Verify document_stem rejects reserved directory traversal paths like '..' or '.'"""
+    reader = PDFReader(b"%PDF-header", document_name="..")
+    with pytest.raises(ValueError, match="document_name must identify a valid file name"):
+        _ = reader.document_stem
+        
