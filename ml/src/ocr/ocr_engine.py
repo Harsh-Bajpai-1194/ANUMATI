@@ -171,10 +171,11 @@ class OCREngine:
 
         full_text = "\n\n".join([p["text"] for p in pages_result if p["text"]])
 
-        # Save to isolated path: outputs/text/<doc_stem>/extracted_text.txt
+        # Save to isolated path: outputs/text/<doc_stem>/<uuid>/extracted_text.txt
         text_file_path = None
         if save_text_file:
-            text_file_path = TEXT_FOLDER / doc_stem / "extracted_text.txt"
+            import uuid
+            text_file_path = TEXT_FOLDER / doc_stem / uuid.uuid4().hex / "extracted_text.txt"
             text_file_path.parent.mkdir(parents=True, exist_ok=True)
             text_file_path.write_text(full_text, encoding="utf-8")
             logger.info(f"Saved extracted text to: {text_file_path}")
