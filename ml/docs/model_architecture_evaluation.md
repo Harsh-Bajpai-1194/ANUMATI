@@ -16,7 +16,7 @@ Institutional compliance forms (e.g., AICTE approval letters, faculty lists, lan
 
 ### Recommendation for Scaling:
 - **Phase 1 (Lightweight / Edge)**: The current `DocumentClassifier` provides deterministic classification with zero heavy GPU memory overhead.
-- **Phase 2 (Deep Learning)**: Fine-tune **LayoutLMv3-base** on synthetic and institutional datasets using token coordinates extracted by `PDFReader.get_page_dimensions()`. LayoutLMv3 jointly encodes text tokens, 2D coordinates, and image patches.
+- **Phase 2 (Deep Learning)**: Fine-tune **LayoutLMv3-base** on synthetic and institutional datasets using token coordinates extracted via PyMuPDF's `page.get_text("words")`. LayoutLMv3 jointly encodes text tokens, 2D coordinates, and image patches.
 
 ---
 
