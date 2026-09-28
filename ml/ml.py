@@ -31,6 +31,13 @@ def parse_args():
         help="Target academic year to verify against (e.g. 2024-25)",
     )
     parser.add_argument(
+        "--pages",
+        nargs="+",
+        type=int,
+        default=None,
+        help="Specific 0-indexed page numbers to convert (e.g. --pages 0 1 2)",
+    )
+    parser.add_argument(
         "--dpi",
         type=int,
         default=300,
@@ -74,7 +81,11 @@ def main():
             print("=" * 60)
             print(f"Target Document : {pdf_path.name}")
 
-            pipeline = VerificationPipeline(target_academic_year=args.year, dpi=args.dpi)
+            pipeline = VerificationPipeline(
+                target_academic_year=args.year,
+                dpi=args.dpi,
+                image_format=args.format,
+            )
             report = pipeline.verify_document(pdf_path, save_report=True, save_images=True)
 
             comp = report["compliance_evaluation"]
@@ -115,7 +126,11 @@ def main():
             for k, v in reader.get_metadata().items():
                 print(f"  {k:16}: {v}")
 
-        images = reader.extract_images(dpi=args.dpi, image_format=args.format)
+        images = reader.extract_images(
+            pages=args.pages,
+            dpi=args.dpi,
+            image_format=args.format,
+        )
         print(f"\nSuccessfully generated {len(images)} image(s).")
         return 0
 

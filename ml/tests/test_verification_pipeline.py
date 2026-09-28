@@ -77,11 +77,12 @@ def test_verification_pipeline_end_to_end(sample_aicte_pdf_bytes):
     assert comp["compliance_score"] >= 0.8
     assert comp["passed_rules"] >= 4
 
-    # Verify JSON report file was written
+    # Verify JSON report file was written and includes report_file_path
     report_file = Path(report["verification_metadata"]["report_file_path"])
     assert report_file.exists()
     saved_data = json.loads(report_file.read_text(encoding="utf-8"))
     assert saved_data["document"]["name"] == "test_institution_approval.pdf"
+    assert saved_data["verification_metadata"]["report_file_path"] == str(report_file)
 
 
 def test_verification_pipeline_non_compliant():
@@ -102,3 +103,24 @@ def test_verification_pipeline_non_compliant():
 
     assert report["compliance_evaluation"]["overall_status"] == "NON_COMPLIANT"
     assert report["compliance_evaluation"]["compliance_score"] < 0.5
+
+
+def test_distinct_documents_distinct_report_paths(sample_aicte_pdf_bytes):
+    """Verify distinct documents with identical document_name do not overwrite reports."""
+    doc2 = fitz.open()
+    p = doc2.new_page()
+    p.insert_text((50, 50), "Different institutional content")
+    buf2 = io.BytesIO()
+    doc2.save(buf2)
+    doc2.close()
+
+    pipeline = VerificationPipeline()
+    rep1 = pipeline.verify_document(sample_aicte_pdf_bytes, document_name="common_name.pdf", save_report=True)
+    rep2 = pipeline.verify_document(buf2.getvalue(), document_name="common_name.pdf", save_report=True)
+
+    path1 = rep1["verification_metadata"]["report_file_path"]
+    path2 = rep2["verification_metadata"]["report_file_path"]
+    assert path1 != path2
+    assert Path(path1).exists()
+    assert Path(path2).exists()
+    
