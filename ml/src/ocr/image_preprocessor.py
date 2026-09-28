@@ -47,7 +47,8 @@ class ImagePreprocessor:
             PIL.Image: Preprocessed image in grayscale ('L') or binary ('1') mode.
         """
         if isinstance(image_source, (str, Path)):
-            img = Image.open(str(image_source))
+            with Image.open(str(image_source)) as src:
+                img = src.copy()
         elif isinstance(image_source, Image.Image):
             # Explicit copy guarantees caller's original image instance is never modified
             img = image_source.copy()
