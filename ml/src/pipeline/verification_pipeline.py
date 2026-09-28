@@ -75,7 +75,7 @@ class VerificationPipeline:
         # 2. Text Extraction (Digital layer + OCR fallback)
         extraction_result = self.ocr_engine.process_document(
             reader,
-            save_text_file=True,
+            save_text_file=save_report,
         )
 
         full_extracted_text = extraction_result["full_text"]
