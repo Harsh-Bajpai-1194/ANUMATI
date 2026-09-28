@@ -42,16 +42,26 @@ def format_markdown_report(report_data: dict) -> str:
     ]
 
     if pdf_perf:
+        total_time = pdf_perf.get("total_time_seconds", 0.0)
+        latency_page = pdf_perf.get("latency_per_page_ms", 0.0)
+        throughput = pdf_perf.get("throughput_pages_per_sec", 0.0)
+        peak_mem = pdf_perf.get("peak_memory_mb", 0.0)
+
+        status_total = "✅ Optimal" if total_time < 5.0 else "⚠️ Exceeds SLA"
+        status_lat = "✅ Exceeds SLA" if latency_page < 100.0 else "⚠️ Needs Optimization"
+        status_thru = "✅ High Throughput" if throughput > 10.0 else "⚠️ Sub-optimal"
+        status_mem = "✅ Low Footprint" if peak_mem < 256.0 else "⚠️ High Memory"
+
         lines.extend([
             "## 3. Real-World Document Throughput & Latency",
             f"Benchmarked on sample document: `{pdf_perf.get('file')}`\n",
             "| Metric | Measured Value | Target SLA | Status |",
             "| :--- | :---: | :---: | :---: |",
             f"| **Pages Processed** | {pdf_perf.get('pages_benchmarked')} pages | - | Complete |",
-            f"| **Total Latency** | {pdf_perf.get('total_time_seconds')} s | < 5.0 s | ✅ Optimal |",
-            f"| **Latency per Page** | **{pdf_perf.get('latency_per_page_ms')} ms/page** | < 100 ms/page | ✅ Exceeds SLA |",
-            f"| **Throughput** | **{pdf_perf.get('throughput_pages_per_sec')} pages/sec** | > 10 pages/sec | ✅ High Throughput |",
-            f"| **Peak Memory Allocation** | **{pdf_perf.get('peak_memory_mb')} MB** | < 256 MB | ✅ Low Footprint |\n",
+            f"| **Total Latency** | {total_time} s | < 5.0 s | {status_total} |",
+            f"| **Latency per Page** | **{latency_page} ms/page** | < 100 ms/page | {status_lat} |",
+            f"| **Throughput** | **{throughput} pages/sec** | > 10 pages/sec | {status_thru} |",
+            f"| **Peak Memory Allocation** | **{peak_mem} MB** | < 256 MB | {status_mem} |\n",
         ])
 
     lines.extend([

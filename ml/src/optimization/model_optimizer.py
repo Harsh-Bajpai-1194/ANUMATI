@@ -1,7 +1,7 @@
 """
-Model Optimization and Runtime Acceleration Module.
-Provides INT8 dynamic quantization profiles, ONNX Runtime speedup estimates,
-and an in-memory LRU document page cache to eliminate redundant OCR invocations.
+Model Optimization and Inference Acceleration Utilities.
+Provides page-level hashing cache, dynamic quantization profiles,
+and ONNX runtime export pipelines for OCR and vision models.
 """
 
 import hashlib
@@ -23,21 +23,24 @@ class DocumentPageCache:
         self.misses = 0
 
     @staticmethod
-    def compute_hash(data: bytes) -> str:
-        return hashlib.md5(data).hexdigest()
+    def compute_hash(image_bytes: bytes) -> str:
+        """Computes MD5 hash digest of raw image bytes."""
+        return hashlib.md5(image_bytes).hexdigest()
 
-    def get(self, key: str) -> Optional[Dict[str, Any]]:
-        if key in self.cache:
+    def get(self, image_hash: str) -> Optional[Dict[str, Any]]:
+        """Retrieves cached OCR result, promoting key to MRU."""
+        if image_hash in self.cache:
             self.hits += 1
-            self.cache.move_to_end(key)
-            return self.cache[key]
+            self.cache.move_to_end(image_hash)
+            return self.cache[image_hash]
         self.misses += 1
         return None
 
-    def set(self, key: str, value: Dict[str, Any]) -> None:
-        if key in self.cache:
-            self.cache.move_to_end(key)
-        self.cache[key] = value
+    def set(self, image_hash: str, extraction_result: Dict[str, Any]) -> None:
+        """Stores result in cache, evicting LRU entry if full."""
+        if image_hash in self.cache:
+            self.cache.move_to_end(image_hash)
+        self.cache[image_hash] = extraction_result
         if len(self.cache) > self.max_entries:
             self.cache.popitem(last=False)
 
@@ -63,33 +66,33 @@ class ModelOptimizer:
     @staticmethod
     def get_quantization_profile() -> Dict[str, Any]:
         """
-        Returns empirical memory footprint and latency profiles
-        across standard model deployment formats.
+        Returns theoretical reference estimates for memory footprint and latency profiles
+        across standard model deployment formats (based on standard Transformer/CNN benchmarks).
         """
         return {
             "pytorch_fp32": {
-                "format": "PyTorch Eager (FP32)",
+                "format": "PyTorch Eager (FP32) [Reference Baseline]",
                 "size_mb": 420.0,
                 "relative_size": "100%",
                 "relative_latency": "1.00x (baseline)",
                 "recommended_for": "Training & Initial Validation"
             },
             "onnx_fp32": {
-                "format": "ONNX Runtime (FP32)",
+                "format": "ONNX Runtime (FP32) [Reference Estimate]",
                 "size_mb": 418.0,
                 "relative_size": "99.5%",
                 "relative_latency": "0.62x (1.6x faster)",
                 "recommended_for": "Production GPU Inference"
             },
             "pytorch_int8": {
-                "format": "PyTorch Dynamic INT8 Quantized",
+                "format": "PyTorch Dynamic INT8 Quantized [Reference Estimate]",
                 "size_mb": 112.0,
                 "relative_size": "26.7%",
                 "relative_latency": "0.45x (2.2x faster on CPU)",
                 "recommended_for": "CPU Cloud Microservices (Current Setup)"
             },
             "onnx_int8": {
-                "format": "ONNX Runtime Quantized (INT8)",
+                "format": "ONNX Runtime Quantized (INT8) [Reference Estimate]",
                 "size_mb": 105.0,
                 "relative_size": "25.0%",
                 "relative_latency": "0.38x (2.6x faster)",

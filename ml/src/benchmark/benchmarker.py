@@ -5,6 +5,7 @@ and OCR accuracy across digital and scanned PDF pipelines.
 """
 
 import os
+import sys
 import time
 import tracemalloc
 from pathlib import Path
@@ -91,15 +92,70 @@ class PipelineBenchmarker:
         distorted_img = StressTester.simulate_low_resolution(distorted_img, scale_factor=0.6)
         processed_restored = self.preprocessor.preprocess(distorted_img, apply_binarization=False)
 
-        # 4. OCR Execution (or high-fidelity fallback when pytesseract binary is not installed)
-        ocr_clean = ""
-        ocr_stress = ""
-        if PYTESSERACT_AVAILABLE:
+        # 4. OCR Execution — fail closed if pytesseract or binary is unavailable
+        tesseract_ver = "Tesseract (unavailable)"
+        if PYTESSERACT_AVAILABLE and pytesseract is not None:
             try:
-                ocr_clean = pytesseract.image_to_string(processed_clean).strip()
-                ocr_stress = pytesseract.image_to_string(processed_restored).strip()
+                tesseract_ver = f"Tesseract {pytesseract.get_tesseract_version()}"
             except Exception:
-                pass
+                tesseract_ver = "Tesseract (binary missing)"
+
+        results: Dict[str, Any] = {
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "environment": {
+                "python_version": sys.version.split()[0],
+                "ocr_engine": tesseract_ver,
+                "pdf_engine": "PyMuPDF (fitz)",
+                "acceleration": "INT8 Dynamic Quantization + Image Preprocessing"
+            }
+        }
+
+        try:
+            extracted_clean = pytesseract.image_to_string(processed_clean).strip()
+            extracted_restored = pytesseract.image_to_string(processed_restored).strip()
+        except Exception as exc:
+            return {
+                "ocr_status": f"error: {exc}",
+                "clean_benchmark": None,
+                "stressed_benchmark": None,
+                "preprocessor_resilience_confirmed": False
+            }
+
+        if not extracted_clean or not extracted_restored:
+            return {
+                "ocr_status": "empty_ocr_result",
+                "clean_benchmark": None,
+                "stressed_benchmark": None,
+                "preprocessor_resilience_confirmed": False
+            }
+
+        # 5. Metrics calculation
+        cer_clean = calculate_cer(ground_truth, extracted_clean)
+        wer_clean = calculate_wer(ground_truth, extracted_clean)
+        acc_clean = calculate_accuracy(ground_truth, extracted_clean)
+
+        cer_stress = calculate_cer(ground_truth, extracted_restored)
+        wer_stress = calculate_wer(ground_truth, extracted_restored)
+        acc_stress = calculate_accuracy(ground_truth, extracted_restored)
+
+        # Confirm resilience based on actual accuracy under distortion
+        resilience_confirmed = bool(acc_stress >= 70.0 and cer_stress <= 0.30)
+
+        return {
+            "ocr_status": "available",
+            "clean_benchmark": {
+                "cer": round(cer_clean, 4),
+                "wer": round(wer_clean, 4),
+                "character_accuracy_pct": round(acc_clean, 2)
+            },
+            "stressed_benchmark": {
+                "distortion": "Skew (10°) + Downsampling (60%)",
+                "cer": round(cer_stress, 4),
+                "wer": round(wer_stress, 4),
+                "character_accuracy_pct": round(acc_stress, 2)
+            },
+            "preprocessor_resilience_confirmed": resilience_confirmed
+        }
 
         extracted_clean = ocr_clean if ocr_clean else ground_truth
         extracted_restored = ocr_stress if ocr_stress else ground_truth
@@ -128,6 +184,17 @@ class PipelineBenchmarker:
             "preprocessor_resilience_confirmed": True
         }
 
+    def test_benchmarker_accuracy_suite():
+        benchmarker = PipelineBenchmarker()
+        report = benchmarker.generate_full_report()
+        assert "accuracy_metrics" in report
+        assert "optimization_profile" in report
+        acc = report["accuracy_metrics"]
+        assert "preprocessor_resilience_confirmed" in acc
+        if acc.get("ocr_status") == "available":
+            assert acc["clean_benchmark"] is not None
+            assert acc["stressed_benchmark"] is not None
+            
     def generate_full_report(self, pdf_path: Optional[str] = None) -> Dict[str, Any]:
         """Runs the entire test suite and packages all benchmark metrics."""
         results: Dict[str, Any] = {

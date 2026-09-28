@@ -91,12 +91,13 @@ class VerificationPipeline:
                 "file_size_bytes": reader.get_metadata().get("file_size_bytes", 0),
                 "is_encrypted": reader.get_metadata().get("is_encrypted", False),
             },
-            "text_extraction": {
+                        "text_extraction": {
                 "method": extraction_result["extraction_method"],
                 "total_words": extraction_result["total_words"],
                 "total_characters": extraction_result["total_characters"],
                 "ocr_engine_available": extraction_result["ocr_engine_available"],
                 "text_file_path": extraction_result.get("text_file_path"),
+                "full_text": full_extracted_text,  # Pass extracted text directly in-memory
                 "pages_preview": [
                     {
                         "page_number": p["page_number"],

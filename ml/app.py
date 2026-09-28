@@ -112,17 +112,19 @@ def execute_evaluation(
             doc_bytes,
             document_name=filename,
             save_report=True,
-            save_images=True
+            save_images=False  # Do not render/save 300 DPI images to disk on API calls
         )
     except Exception as exc:
         logger.error(f"Verification pipeline failed: {exc}", exc_info=True)
-        raise HTTPException(status_code=400, detail=f"Failed to process PDF: {exc}")
+        # Avoid leaking internal filesystem details / raw exception text to clients
+        raise HTTPException(status_code=400, detail="Failed to process PDF.") from exc
 
-    full_text = report["extracted_entities"].get("clean_text") or ""
-    # Retrieve raw text if not directly in entities
-    text_path = report["text_extraction"].get("text_file_path")
-    if text_path and Path(text_path).exists():
-        full_text = Path(text_path).read_text(encoding="utf-8")
+    # In-memory text retrieval prevents race conditions between concurrent requests
+    full_text = (
+        report.get("text_extraction", {}).get("full_text")
+        or report.get("extracted_entities", {}).get("clean_text")
+        or ""
+    )
 
     # 2. Run Document Classifier
     classification_result = document_classifier.classify_text(full_text)

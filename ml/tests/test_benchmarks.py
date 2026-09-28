@@ -95,4 +95,12 @@ def test_benchmarker_accuracy_suite():
     report = benchmarker.generate_full_report()
     assert "accuracy_metrics" in report
     assert "optimization_profile" in report
-    assert report["accuracy_metrics"]["preprocessor_resilience_confirmed"] is True
+    acc = report["accuracy_metrics"]
+    assert "preprocessor_resilience_confirmed" in acc
+    if acc.get("ocr_status") == "available":
+        assert acc["clean_benchmark"] is not None
+        assert acc["stressed_benchmark"] is not None
+        assert acc["preprocessor_resilience_confirmed"] is True
+    else:
+        # When OCR is unavailable or fails, fail closed gracefully
+        assert acc["preprocessor_resilience_confirmed"] is False
