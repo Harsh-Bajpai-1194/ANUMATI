@@ -63,8 +63,10 @@ class PDFReader:
 
     @property
     def document_stem(self) -> str:
-        """Returns document name without extension (used for output folders)."""
-        clean_name = Path(self.document_name).name
+        """Returns sanitized document name without extension (used for output folders)."""
+        # Normalize Windows backslashes to forward slashes to prevent traversal across all OSes
+        normalized_name = str(self.document_name).replace("\\", "/")
+        clean_name = Path(normalized_name).name
         stem = Path(clean_name).stem
         if stem in ("", ".", ".."):
             raise ValueError("document_name must identify a valid file name")

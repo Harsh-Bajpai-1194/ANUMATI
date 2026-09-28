@@ -17,6 +17,7 @@ except ImportError:
     pytesseract = None
     PYTESSERACT_AVAILABLE = False
 
+
 class OCREngineError(Exception):
     """Exception raised for unrecoverable errors during OCR and text extraction."""
     pass
@@ -69,32 +70,23 @@ class OCREngine:
 
     def process_document(
         self,
-        reader_or_source: Union[PDFReader, str, Path, bytes],
+        reader_or_source: Union[PDFReader, str, Path, bytes, io.BytesIO],
         document_name: Optional[str] = None,
         save_text_file: bool = True
     ) -> Dict[str, Any]:
         """
         Extract text from all pages using the hybrid strategy.
-        Raises OCREngineError on invalid source or unrecoverable PDF reading errors.
+        Accepts PDFReader, file path, raw bytes, or io.BytesIO stream.
         """
-        # Validate and construct reader
-        try:
-            if isinstance(reader_or_source, PDFReader):
-                reader = reader_or_source
-            elif isinstance(reader_or_source, (str, Path, bytes)):
-                reader = PDFReader(reader_or_source, document_name=document_name)
-            else:
-                raise TypeError(f"Unsupported reader or source type: {type(reader_or_source)}")
-        except Exception as exc:
-            raise OCREngineError(f"Failed to initialize PDFReader for OCR: {exc}") from exc
+        if isinstance(reader_or_source, PDFReader):
+            reader = reader_or_source
+        elif isinstance(reader_or_source, (str, Path, bytes, io.BytesIO)):
+            reader = PDFReader(reader_or_source, document_name=document_name)
+        else:
+            raise OCREngineError(f"Unsupported reader or source type: {type(reader_or_source)}")
 
         doc_stem = reader.document_stem
-
-        try:
-            total_pages = reader.total_pages()
-        except PDFProcessingError as exc:
-            raise OCREngineError(f"Cannot read PDF pages for OCR extraction: {exc}") from exc
-
+        total_pages = reader.total_pages()
         pages_result: List[Dict[str, Any]] = []
         total_words = 0
         total_chars = 0

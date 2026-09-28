@@ -12,6 +12,7 @@ except ImportError:
 from src.ocr.image_preprocessor import ImagePreprocessor
 from src.ocr.ocr_engine import OCREngine, OCREngineError
 from unittest.mock import patch, MagicMock
+from src.preprocessing.pdf_reader import PDFReader
 
 
 @pytest.fixture
@@ -138,9 +139,30 @@ def test_ocr_graceful_degradation_without_tesseract(scanned_blank_pdf_bytes):
         assert result["extraction_method"] == "unreadable_or_empty"
         assert result["total_words"] == 0
 
-
 def test_ocr_engine_error_on_invalid_source():
     """Verify OCREngineError is raised for invalid inputs."""
     engine = OCREngine()
-    with pytest.raises(OCREngineError, match="Failed to initialize PDFReader"):
+    with pytest.raises(OCREngineError, match="Unsupported reader or source type"):
         engine.process_document(12345)
+
+def test_document_stem_sanitizes_windows_backslashes():
+    """Verify document_stem handles Windows backslash path traversal."""
+    # 1. Backslash path with valid filename should sanitize to stem
+    reader = PDFReader(b"%PDF-1.4-sample", document_name="..\\..\\evil_doc.pdf")
+    assert reader.document_stem == "evil_doc"
+
+    # 2. Bare backslash traversal must raise ValueError
+    reader_traversal = PDFReader(b"%PDF-1.4-sample", document_name="..\\..\\..")
+    with pytest.raises(ValueError, match="document_name must identify a valid file name"):
+        _ = reader_traversal.document_stem
+
+
+def test_ocr_engine_accepts_bytesio(digital_pdf_bytes):
+    """Verify OCREngine.process_document accepts io.BytesIO stream directly."""
+    engine = OCREngine(min_words_threshold=5)
+    stream = io.BytesIO(digital_pdf_bytes)
+    result = engine.process_document(stream, document_name="streamed_report.pdf", save_text_file=False)
+
+    assert result["total_pages"] == 2
+    assert result["extraction_method"] == "digital_text_layer"
+    assert "ALL INDIA COUNCIL FOR TECHNICAL EDUCATION" in result["full_text"]
