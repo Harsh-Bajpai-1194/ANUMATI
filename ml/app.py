@@ -9,6 +9,7 @@ import asyncio
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from src.config import UPLOAD_FOLDER
 
 from src.pipeline.verification_pipeline import VerificationPipeline
 from src.classification.document_classifier import DocumentClassifier
@@ -215,21 +216,26 @@ async def evaluate_document(
     1. JSON body: { "filePath": "...", "documentId": "..." } (Used by Node.js backend)
     2. Multipart file upload: file (Used by frontend direct uploads)
     """
-    # Security Boundary: Restrict local file reads to project root and temp dir (for pytest)
-    import tempfile
     import asyncio
     
-    ALLOWED_ROOTS = [
-        Path(__file__).parent.parent.resolve(),
-        Path(tempfile.gettempdir()).resolve()
-    ]
+    # Restrict to UPLOAD_FOLDER per CodeRabbit
+    ALLOWED_ROOTS = [UPLOAD_FOLDER.resolve()]
     
     def check_safe_path(target: Path):
-        if not any(target.is_relative_to(root) for root in ALLOWED_ROOTS):
+        # CodeQL fix: use strict=False during resolution
+        normalized_target = target.resolve(strict=False)
+        if not any(normalized_target.is_relative_to(root) for root in ALLOWED_ROOTS):
             raise HTTPException(
                 status_code=403, 
                 detail="Security Error: Path is outside allowed directories."
             )
+
+    def build_safe_target_path(path_str: str) -> Path:
+        if not path_str:
+            raise HTTPException(status_code=400, detail="'filePath' must be a non-empty string.")
+        target = Path(path_str).resolve(strict=False)
+        check_safe_path(target)
+        return target
 
     try:
         # Check if request has application/json content-type
@@ -237,40 +243,30 @@ async def evaluate_document(
         if "application/json" in content_type:
             data = await request.json()
             target_path_str = data.get("filePath")
-            if not target_path_str:
-                raise HTTPException(status_code=400, detail="'filePath' field is required in JSON body.")
-
-            target_path = Path(target_path_str).resolve()
-            check_safe_path(target_path)
+            target_path = build_safe_target_path(target_path_str)
             
             if not target_path.exists() or not target_path.is_file():
-                # Do NOT echo the target_path in the error detail to prevent path discovery attacks
                 raise HTTPException(status_code=404, detail="File not found.")
 
             doc_bytes = await asyncio.to_thread(_read_file_sync, target_path)
             target_year = data.get("targetAcademicYear")
             
-            # Offload heavy pipeline to thread
             return await asyncio.to_thread(execute_evaluation, doc_bytes, target_path.name, target_year)
 
         # Multipart upload: direct file
         if file is not None:
             doc_bytes = await file.read()
-            # Offload heavy pipeline to thread
             return await asyncio.to_thread(execute_evaluation, doc_bytes, file.filename or "uploaded.pdf", targetAcademicYear)
 
         # Multipart form: filePath field
         if filePath:
-            target_path = Path(filePath).resolve()
-            check_safe_path(target_path)
+            target_path = build_safe_target_path(filePath)
             
             if not target_path.exists() or not target_path.is_file():
-                # Do NOT echo the target_path in the error detail
                 raise HTTPException(status_code=404, detail="File not found.")
                 
             doc_bytes = await asyncio.to_thread(_read_file_sync, target_path)
             
-            # Offload heavy pipeline to thread
             return await asyncio.to_thread(execute_evaluation, doc_bytes, target_path.name, targetAcademicYear)
 
         raise HTTPException(
@@ -291,3 +287,4 @@ async def evaluate_document(
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("app:app", host="127.0.0.1", port=8000, reload=True)
+    

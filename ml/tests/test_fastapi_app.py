@@ -66,10 +66,12 @@ def test_evaluate_multipart_upload(sample_pdf_bytes):
     assert "anomalyDetection" in data
     assert "signatureVerification" in data
 
-
-def test_evaluate_json_filepath(sample_pdf_bytes, tmp_path):
+def test_evaluate_json_filepath(sample_pdf_bytes, tmp_path, monkeypatch):
     pdf_file = tmp_path / "saved_doc.pdf"
     pdf_file.write_bytes(sample_pdf_bytes)
+
+    # Monkeypatch the UPLOAD_FOLDER so the API allows reading from the test tmp_path
+    monkeypatch.setattr("app.UPLOAD_FOLDER", tmp_path)
 
     response = client.post(
         "/evaluate",
@@ -80,7 +82,7 @@ def test_evaluate_json_filepath(sample_pdf_bytes, tmp_path):
     assert data["success"] is True
     assert data["complianceEvaluation"]["overall_status"] == "COMPLIANT"
 
-
 def test_evaluate_missing_payload():
     response = client.post("/evaluate")
     assert response.status_code == 400
+    
