@@ -57,6 +57,8 @@ const sampleMlReport = {
 const runVerification = async () => {
   console.log('--- Starting AI Evaluation Verification Test ---');
 
+  let savedRecordId = null;
+
   try {
     await connectMongoDB();
 
@@ -65,6 +67,7 @@ const runVerification = async () => {
     // 1. Test parsing & storing
     console.log(`\n1. Storing sample AI evaluation report for: ${testAppId}`);
     const stored = await parseAndStoreAiReport(testAppId, sampleMlReport);
+    savedRecordId = stored._id;
     console.log(`   ✓ Saved document with MongoDB _id: ${stored._id}`);
     console.log(`   ✓ OCR Score: ${stored.extractedTextMetadata.ocrConfidenceScore}`);
     console.log(`   ✓ Anomaly Flagged: ${stored.anomalyDetection.flagged}`);
@@ -85,23 +88,54 @@ const runVerification = async () => {
 
     // 4. Test error handling for missing applicationId
     console.log('\n4. Testing validation for missing applicationId');
+    let rejectedAsExpected = false;
     try {
       await parseAndStoreAiReport('', sampleMlReport);
-      throw new Error('Should have thrown validation error for empty applicationId');
     } catch (err) {
-      console.log(`   ✓ Properly rejected missing applicationId: "${err.message}"`);
+      if (err.message.includes('valid applicationId')) {
+        rejectedAsExpected = true;
+        console.log(`   ✓ Properly rejected missing applicationId: "${err.message}"`);
+      } else {
+        throw err;
+      }
+    }
+    if (!rejectedAsExpected) {
+      throw new Error('Should have thrown validation error for empty applicationId');
     }
 
-    // Clean up test document
-    await AiEvaluation.deleteOne({ _id: stored._id });
-    console.log(`\n✓ Cleanup: Removed temporary test document.`);
+    // 5. Test rejection of empty / incomplete reports
+    console.log('\n5. Testing validation for empty / incomplete report object');
+    let incompleteRejected = false;
+    try {
+      await parseAndStoreAiReport(testAppId, {});
+    } catch (err) {
+      if (err.message.includes('Missing required')) {
+        incompleteRejected = true;
+        console.log(`   ✓ Properly rejected empty report: "${err.message}"`);
+      } else {
+        throw err;
+      }
+    }
+    if (!incompleteRejected) {
+      throw new Error('Should have rejected empty report object');
+    }
 
     console.log('\n========================================');
     console.log('  ALL AI EVALUATION TESTS PASSED (100%)');
     console.log('========================================');
   } catch (error) {
     console.error('\n❌ Test failed:', error);
+    process.exitCode = 1;
   } finally {
+    // Cleanup temporary record even if assertions failed
+    if (savedRecordId) {
+      try {
+        await AiEvaluation.deleteOne({ _id: savedRecordId });
+        console.log(`\n✓ Cleanup: Removed temporary test document ${savedRecordId}.`);
+      } catch (cleanupErr) {
+        console.warn('⚠️ Warning: Failed to clean up test document:', cleanupErr.message);
+      }
+    }
     await disconnectMongoDB();
   }
 };

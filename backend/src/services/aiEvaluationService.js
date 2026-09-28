@@ -2,6 +2,7 @@ import path from 'path';
 import AiEvaluation from '../models/AiEvaluation.js';
 
 const ML_SERVICE_URL = process.env.ML_SERVICE_URL || 'http://127.0.0.1:8000';
+const ML_REQUEST_TIMEOUT_MS = parseInt(process.env.ML_REQUEST_TIMEOUT_MS, 10) || 60000;
 
 const VALID_SEVERITIES = new Set(['low', 'medium', 'high', 'critical']);
 
@@ -39,8 +40,20 @@ export const parseAndStoreAiReport = async (applicationId, rawReport) => {
     throw new Error('A valid applicationId string is required to store an AI evaluation report.');
   }
 
-  if (!rawReport || typeof rawReport !== 'object') {
+  if (!rawReport || typeof rawReport !== 'object' || Array.isArray(rawReport)) {
     throw new Error('A valid JSON report object is required.');
+  }
+
+  // Reject incomplete or failed evaluation reports
+  if (rawReport.status && rawReport.status !== 'completed' && rawReport.status !== 'success') {
+    throw new Error(`Cannot store evaluation with incomplete status: "${rawReport.status}".`);
+  }
+
+  const hasExtraction = Boolean(rawReport.textExtraction || rawReport.extractedTextMetadata);
+  const hasAnomaly = Boolean(rawReport.anomalyDetection);
+
+  if (!hasExtraction && !hasAnomaly) {
+    throw new Error('Invalid evaluation report: Missing required text extraction and anomaly detection fields.');
   }
 
   // Extract text metadata (supports both ML service schema and legacy schema)
@@ -92,26 +105,39 @@ export const dispatchAiEvaluation = async (applicationId, filePath) => {
 
   console.log(`[ML Dispatcher] Sending ${applicationId} to ML Service at ${ML_SERVICE_URL}/evaluate...`);
 
-  const response = await fetch(`${ML_SERVICE_URL}/evaluate`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      filePath: absolutePath,
-      documentId: applicationId
-    })
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), ML_REQUEST_TIMEOUT_MS);
 
-  if (!response.ok) {
-    const errData = await response.json().catch(() => ({}));
-    throw new Error(errData.detail || `ML Service responded with HTTP ${response.status}`);
+  try {
+    const response = await fetch(`${ML_SERVICE_URL}/evaluate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        filePath: absolutePath,
+        documentId: applicationId
+      }),
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      throw new Error(errData.detail || `ML Service responded with HTTP ${response.status}`);
+    }
+
+    const evaluationResult = await response.json();
+    console.log(`[ML Dispatcher] ML evaluation received for ${applicationId}. Storing report...`);
+
+    return await parseAndStoreAiReport(applicationId, evaluationResult);
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error(`ML evaluation request timed out after ${ML_REQUEST_TIMEOUT_MS}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  const evaluationResult = await response.json();
-  console.log(`[ML Dispatcher] ML evaluation received for ${applicationId}. Storing report...`);
-
-  return await parseAndStoreAiReport(applicationId, evaluationResult);
 };
 
 /**
