@@ -49,10 +49,12 @@ class AICTERuleEngine:
 
     @staticmethod
     def _is_negated(text: str, match_start: int) -> bool:
-        """Checks if a match is preceded or succeeded by a negation clause."""
+        """Checks if a match is preceded or succeeded by a negation clause within its own sentence/line."""
         snippet_start = max(0, match_start - 60)
         snippet_end = min(len(text), match_start + 80)
-        snippet = text[snippet_start:snippet_end].lower()
+        before = re.split(r"[.\n;]", text[snippet_start:match_start])[-1]
+        after = re.split(r"[.\n;]", text[match_start:snippet_end])[0]
+        snippet = (before + after).lower()
 
         negation_terms = [
             r"\bno\b",
@@ -113,7 +115,11 @@ class AICTERuleEngine:
         ay = entities["academic_year"]
         if ay:
             if self.target_academic_year:
-                if ay == self.target_academic_year or self.target_academic_year in ay:
+                def _norm(y: str) -> str:
+                    m = re.match(r"^(\d{4})[/-](?:\d{2})?(\d{2})$", y.strip())
+                    return f"{m.group(1)}-{m.group(2)}" if m else y.strip()
+
+                if _norm(ay) == _norm(self.target_academic_year):
                     ay_status = "PASSED"
                     ay_details = f"Document specifies matching Academic Year: {ay}"
                 else:
@@ -130,15 +136,7 @@ class AICTERuleEngine:
                 "severity": "medium",
                 "details": ay_details,
             })
-        else:
-            rule_results.append({
-                "rule_id": "AICTE-R02-ACADEMIC_YEAR",
-                "name": "Academic Year Specification",
-                "status": "FAILED",
-                "severity": "medium",
-                "details": "No valid academic year format (e.g. 2024-25) detected in document text.",
-            })
-
+        
         # -------------------------------------------------------------
         # Rule 3: Mandatory Statutory Committees
         # -------------------------------------------------------------
