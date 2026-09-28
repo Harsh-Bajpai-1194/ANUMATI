@@ -20,26 +20,36 @@ def format_markdown_report(report_data: dict) -> str:
     """Formats benchmark results into a clean markdown document."""
     env = report_data.get("environment", {})
     acc = report_data.get("accuracy_metrics", {})
-    clean = acc.get("clean_benchmark", {})
-    stress = acc.get("stressed_benchmark", {})
+    clean = acc.get("clean_benchmark") or {}
+    stress = acc.get("stressed_benchmark") or {}
     pdf_perf = report_data.get("pdf_performance")
     opt = report_data.get("optimization_profile", {})
+    ocr_status = acc.get("ocr_status", "available")
 
     lines = [
         "# ANUMATI ML Engine — Performance & Benchmark Report",
         f"**Generated:** {report_data.get('timestamp')} | **Issue:** #55\n",
         "## 1. System & Execution Environment",
-        f"- **Python Version:** {env.get('python_version')}",
-        f"- **PDF Engine:** {env.get('pdf_engine')}",
-        f"- **OCR Framework:** {env.get('ocr_engine')}",
+        f"- **Python Version:** {env.get('python_version', sys.version.split()[0])}",
+        f"- **PDF Engine:** {env.get('pdf_engine', 'PyMuPDF (fitz)')}",
+        f"- **OCR Framework:** {env.get('ocr_engine', 'Tesseract (unavailable)')}",
         f"- **Optimization:** {env.get('acceleration')}\n",
         "## 2. OCR Accuracy & Error Rate Metrics",
-        "Evaluated using Levenshtein distance on standard AICTE institutional documents:\n",
-        "| Evaluation Scenario | Character Error Rate (CER) | Word Error Rate (WER) | Accuracy (%) |",
-        "| :--- | :---: | :---: | :---: |",
-        f"| **Pristine / High-Res Scan** | `{clean.get('cer', 0.0):.4f}` | `{clean.get('wer', 0.0):.4f}` | **{clean.get('character_accuracy_pct', 100.0)}%** |",
-        f"| **Degraded (10° Skew + 60% Scale)** | `{stress.get('cer', 0.0):.4f}` | `{stress.get('wer', 0.0):.4f}` | **{stress.get('character_accuracy_pct', 100.0)}%** |\n",
     ]
+
+    if ocr_status != "available" or not clean:
+        lines.extend([
+            f"⚠️ **OCR Accuracy Benchmark Skipped / Unavailable:** Status: `{ocr_status}`.\n",
+            "> Install `tesseract-ocr` system binary to run live OCR accuracy degradation benchmarks.\n"
+        ])
+    else:
+        lines.extend([
+            "Evaluated using Levenshtein distance on standard AICTE institutional documents:\n",
+            "| Evaluation Scenario | Character Error Rate (CER) | Word Error Rate (WER) | Accuracy (%) |",
+            "| :--- | :---: | :---: | :---: |",
+            f"| **Pristine / High-Res Scan** | `{clean.get('cer', 0.0):.4f}` | `{clean.get('wer', 0.0):.4f}` | **{clean.get('character_accuracy_pct', 100.0)}%** |",
+            f"| **Degraded (10° Skew + 60% Scale)** | `{stress.get('cer', 0.0):.4f}` | `{stress.get('wer', 0.0):.4f}` | **{stress.get('character_accuracy_pct', 100.0)}%** |\n",
+        ])
 
     if pdf_perf:
         total_time = pdf_perf.get("total_time_seconds", 0.0)
