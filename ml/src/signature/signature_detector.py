@@ -151,5 +151,5 @@ class SignatureDetector:
             "confidence": round(highest_confidence, 2),
             "pages_analyzed": pages_to_scan,
             "page_detections": detections,
-            "status": "verified" if overall_detected else "unverified_or_missing",
+            "status": "verified" if has_signature else "unverified_or_missing",
         }
