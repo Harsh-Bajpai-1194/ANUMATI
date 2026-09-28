@@ -15,7 +15,7 @@ logger = logging.getLogger("anumati-ml.signature_detector")
 class SignatureDetector:
     """
     Detects official institutional rubber seals and handwritten ink signatures
-    using color channel segmentation and vector drawing analysis.
+    using color channel segmentation, spatial vector proximity, and OCR fallback.
     """
 
     def __init__(self, min_signature_strokes: int = 15):
@@ -31,8 +31,6 @@ class SignatureDetector:
         width, height = rgb_img.size
         total_pixels = width * height
 
-        # Sample pixel coordinates to detect colored ink
-        # Official institutional stamps and signatures are predominantly blue, purple, or red
         colored_ink_pixels = 0
         signature_like_pixels = 0
 
@@ -58,6 +56,7 @@ class SignatureDetector:
                     signature_like_pixels += 1
 
         colored_ratio = colored_ink_pixels / max(sampled_total, 1)
+        signature_ratio = signature_like_pixels / max(sampled_total, 1)
 
         # Detect seal if colored ink ratio exceeds minimum threshold
         stamp_detected = colored_ratio > 0.003
@@ -67,6 +66,7 @@ class SignatureDetector:
             "stamp_detected": stamp_detected,
             "stamp_confidence": stamp_confidence,
             "colored_ink_ratio": round(colored_ratio, 4),
+            "signature_ratio": round(signature_ratio, 4),
         }
 
     def detect_signatures_in_pdf(
@@ -92,15 +92,19 @@ class SignatureDetector:
             }
 
         total_pages = len(doc)
-        pages_to_scan = min(total_pages, max_pages_to_check)
         
+        # Scan first few pages and the last page (where signatures commonly appear)
+        pages_to_scan_indices = list(range(min(total_pages, max_pages_to_check)))
+        if total_pages > max_pages_to_check and (total_pages - 1) not in pages_to_scan_indices:
+            pages_to_scan_indices.append(total_pages - 1)
+            
         has_signature = False
         has_stamp = False
         highest_confidence = 0.20
         detections: List[Dict[str, Any]] = []
 
         with doc:
-            for page_idx in range(pages_to_scan):
+            for page_idx in pages_to_scan_indices:
                 page = doc[page_idx]
                 page_num = page_idx + 1
 
@@ -108,20 +112,48 @@ class SignatureDetector:
                 drawings_count = len(page.get_drawings())
                 images_count = len(page.get_images())
 
-                # 2. Check for signature keywords in page text
-                page_text = page.get_text().lower()
-                has_sign_keyword = any(
-                    k in page_text for k in ["signature", "authorized signatory", "principal", "director", "seal"]
-                )
-
-                # 3. Image analysis for stamps
+                # 2. Image analysis for stamps and ink
                 pix = page.get_pixmap(dpi=150)
                 pil_img = Image.open(io.BytesIO(pix.tobytes("png")))
                 img_analysis = self._detect_ink_and_seals_in_image(pil_img)
 
-                # Signature heuristic: vector clusters or raster blocks near signature keywords
-                page_signature = (drawings_count > self.min_signature_strokes or images_count > 0) and has_sign_keyword
-                page_stamp = img_analysis["stamp_detected"]
+                # 3. Extract text with OCR fallback for scanned PDFs
+                page_text = page.get_text().lower()
+                if not page_text.strip():
+                    try:
+                        import pytesseract
+                        page_text = pytesseract.image_to_string(pil_img).lower()
+                    except Exception:
+                        pass
+                
+                kw_list = ["signature", "authorized signatory", "principal", "director", "seal"]
+                has_sign_keyword = any(k in page_text for k in kw_list)
+
+                # 4. Spatial correlation: Check if drawings are physically near keywords
+                signature_near_keyword = False
+                if has_sign_keyword and drawings_count > self.min_signature_strokes:
+                    keyword_rects = []
+                    for kw in ["signature", "authorized", "signatory", "principal", "director"]:
+                        keyword_rects.extend(page.search_for(kw))
+                    
+                    for path in page.get_drawings():
+                        path_rect = path.get("rect")
+                        if path_rect:
+                            for kw_rect in keyword_rects:
+                                # Check if drawing is within ~150 points vertically of keyword
+                                if abs(path_rect.y1 - kw_rect.y1) < 150:
+                                    signature_near_keyword = True
+                                    break
+                        if signature_near_keyword:
+                            break
+
+                # Signature heuristic: 
+                # A. Vector drawings spatially located near a signature keyword
+                # B. OR High concentration of handwritten-like dark pixels (fallback for images)
+                page_signature = signature_near_keyword or (img_analysis.get("signature_ratio", 0.0) > 0.015)
+                
+                # Require corroborating evidence (keywords or drawings) for stamps to prevent false positives from blue headers
+                page_stamp = img_analysis["stamp_detected"] and (has_sign_keyword or drawings_count > 0)
 
                 if page_signature:
                     has_signature = True
@@ -149,7 +181,8 @@ class SignatureDetector:
             "stamp_detected": has_stamp,
             "overall_detected": overall_detected,
             "confidence": round(highest_confidence, 2),
-            "pages_analyzed": pages_to_scan,
+            "pages_analyzed": len(pages_to_scan_indices),  # Fixed NameError here
             "page_detections": detections,
-            "status": "verified" if overall_detected else "unverified_or_missing",
+            "status": "verified" if has_signature else "unverified_or_missing",
         }
+    

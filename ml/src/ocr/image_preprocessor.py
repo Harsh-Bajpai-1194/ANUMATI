@@ -9,10 +9,21 @@ logger = logging.getLogger("anumati-ml.image_preprocessor")
 class ImagePreprocessor:
     """
     Image enhancement and cleaning pipeline to maximize OCR recognition accuracy.
-    Performs grayscale conversion, contrast enhancement, noise filtering, and binarization.
+    Performs grayscale conversion, contrast enhancement, edge sharpening, and optional binarization.
     """
 
-    def __init__(self, contrast_factor: float = 1.8, binarize_threshold: int = 180):
+    def __init__(
+        self,
+        contrast_factor: float = 1.8,
+        binarize_threshold: int = 180,
+    ):
+        """
+        Parameters:
+            contrast_factor (float): Multiplier for contrast enhancement. 1.8 is chosen
+                to separate faded stamp ink and low-contrast text from paper backgrounds.
+            binarize_threshold (int): Grayscale cutoff (0-255). Values > threshold become white (255),
+                others become black (0). Default 180 separates dark ink from off-white scans.
+        """
         self.contrast_factor = contrast_factor
         self.binarize_threshold = binarize_threshold
 
@@ -20,7 +31,7 @@ class ImagePreprocessor:
         self,
         image_source: Union[str, Path, Image.Image],
         output_path: Optional[Union[str, Path]] = None,
-        apply_binarization: bool = True
+        apply_binarization: bool = False,
     ) -> Image.Image:
         """
         Enhance an image for OCR.
@@ -28,19 +39,23 @@ class ImagePreprocessor:
         Parameters:
             image_source: Path to an image file or an existing PIL Image.
             output_path: Optional path to save the preprocessed image.
-            apply_binarization: Whether to apply black & white thresholding.
+            apply_binarization: Whether to apply hard 1-bit thresholding.
+                Default is False because Tesseract's internal adaptive thresholding
+                often yields higher accuracy on grayscale images with uneven lighting.
 
         Returns:
-            PIL.Image: Preprocessed image in grayscale or binary mode.
+            PIL.Image: Preprocessed image in grayscale ('L') or binary ('1') mode.
         """
         if isinstance(image_source, (str, Path)):
-            img = Image.open(str(image_source))
+            with Image.open(str(image_source)) as src:
+                img = src.copy()
         elif isinstance(image_source, Image.Image):
+            # Explicit copy guarantees caller's original image instance is never modified
             img = image_source.copy()
         else:
             raise TypeError(f"Unsupported image source type: {type(image_source)}")
 
-        # 1. Convert to Grayscale
+        # 1. Convert to Grayscale ('L' creates a new image instance)
         gray_img = img.convert("L")
 
         # 2. Enhance contrast
@@ -52,7 +67,6 @@ class ImagePreprocessor:
 
         # 4. Optional Binarization (Thresholding)
         if apply_binarization:
-            # Map pixels: > threshold -> 255 (white background), else 0 (black text)
             processed_img = sharpened_img.point(
                 lambda p: 255 if p > self.binarize_threshold else 0,
                 mode="1"

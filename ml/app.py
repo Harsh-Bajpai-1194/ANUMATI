@@ -1,16 +1,15 @@
-import sys
+import io
+import json
 import logging
+from typing import Dict, Any, Optional, List
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+import tempfile
+import asyncio
 
-# Ensure 'ml' directory is in sys.path
-CURRENT_DIR = Path(__file__).resolve().parent
-if str(CURRENT_DIR) not in sys.path:
-    sys.path.insert(0, str(CURRENT_DIR))
-
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from src.config import UPLOAD_FOLDER
 
 from src.pipeline.verification_pipeline import VerificationPipeline
 from src.classification.document_classifier import DocumentClassifier
@@ -79,6 +78,27 @@ def execute_evaluation(
             status_code=413,
             detail=f"File exceeds maximum allowed size of {MAX_FILE_SIZE_BYTES / (1024 * 1024):.1f}MB"
         )
+
+    # Security: Enforce MAX_PAGES before running heavy OCR or pipeline rendering
+    try:
+        try:
+            import pymupdf as fitz
+        except ImportError:
+            import fitz
+            
+        doc = fitz.open(stream=doc_bytes, filetype="pdf")
+        total_pages = len(doc)
+        doc.close()
+        
+        if total_pages > MAX_PAGES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Document exceeds maximum allowed pages ({MAX_PAGES}). Found {total_pages} pages."
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid or corrupted PDF document.")
 
     # 1. Run Verification Pipeline (PDFReader, OCR, AICTE Rules)
     pipeline = (
@@ -178,50 +198,76 @@ def execute_evaluation(
     }
 
 
+def _read_file_sync(target_path: Path) -> bytes:
+    """Helper to read file bytes synchronously."""
+    with open(target_path, "rb") as f:
+        return f.read()
+
 @app.post("/evaluate")
 async def evaluate_document(
     request: Request,
     file: Optional[UploadFile] = File(None),
     filename: Optional[str] = Form(None),
-    filePath: Optional[str] = Form(None)
+    filePath: Optional[str] = Form(None),
+    targetAcademicYear: Optional[str] = Form(None)
 ):
     """
     Accepts document evaluation requests via:
     1. JSON body: { "filePath": "...", "documentId": "..." } (Used by Node.js backend)
     2. Multipart file upload: file (Used by frontend direct uploads)
     """
+    import asyncio
+    
+    # Restrict to UPLOAD_FOLDER per CodeRabbit
+    ALLOWED_ROOTS = [UPLOAD_FOLDER.resolve()]
+    
+    def check_safe_path(target: Path):
+        # CodeQL fix: use strict=False during resolution
+        normalized_target = target.resolve(strict=False)
+        if not any(normalized_target.is_relative_to(root) for root in ALLOWED_ROOTS):
+            raise HTTPException(
+                status_code=403, 
+                detail="Security Error: Path is outside allowed directories."
+            )
+
+    def build_safe_target_path(path_str: str) -> Path:
+        if not path_str:
+            raise HTTPException(status_code=400, detail="'filePath' must be a non-empty string.")
+        target = Path(path_str).resolve(strict=False)
+        check_safe_path(target)
+        return target
+
     try:
         # Check if request has application/json content-type
         content_type = request.headers.get("content-type", "")
         if "application/json" in content_type:
             data = await request.json()
             target_path_str = data.get("filePath")
-            if not target_path_str:
-                raise HTTPException(status_code=400, detail="'filePath' field is required in JSON body.")
+            target_path = build_safe_target_path(target_path_str)
+            
+            if not target_path.exists() or not target_path.is_file():
+                raise HTTPException(status_code=404, detail="File not found.")
 
-            target_path = Path(target_path_str).resolve()
-            if not target_path.exists():
-                raise HTTPException(status_code=404, detail=f"File not found at: {target_path}")
-
-            with open(target_path, "rb") as f:
-                doc_bytes = f.read()
-
+            doc_bytes = await asyncio.to_thread(_read_file_sync, target_path)
             target_year = data.get("targetAcademicYear")
-            return execute_evaluation(doc_bytes, target_path.name, target_year)
+            
+            return await asyncio.to_thread(execute_evaluation, doc_bytes, target_path.name, target_year)
 
         # Multipart upload: direct file
         if file is not None:
             doc_bytes = await file.read()
-            return execute_evaluation(doc_bytes, file.filename or "uploaded.pdf")
+            return await asyncio.to_thread(execute_evaluation, doc_bytes, file.filename or "uploaded.pdf", targetAcademicYear)
 
         # Multipart form: filePath field
         if filePath:
-            target_path = Path(filePath).resolve()
-            if not target_path.exists():
-                raise HTTPException(status_code=404, detail=f"File not found at: {target_path}")
-            with open(target_path, "rb") as f:
-                doc_bytes = f.read()
-            return execute_evaluation(doc_bytes, target_path.name)
+            target_path = build_safe_target_path(filePath)
+            
+            if not target_path.exists() or not target_path.is_file():
+                raise HTTPException(status_code=404, detail="File not found.")
+                
+            doc_bytes = await asyncio.to_thread(_read_file_sync, target_path)
+            
+            return await asyncio.to_thread(execute_evaluation, doc_bytes, target_path.name, targetAcademicYear)
 
         raise HTTPException(
             status_code=400,
@@ -241,3 +287,4 @@ async def evaluate_document(
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("app:app", host="127.0.0.1", port=8000, reload=True)
+    

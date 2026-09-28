@@ -66,7 +66,7 @@ class DocumentClassifier:
                 "description": "Empty document text; unable to classify.",
             }
 
-        text_lower = text.lower()
+        text_lower = " ".join(text.lower().split())
         category_scores: Dict[str, float] = {}
         matched_by_cat: Dict[str, List[str]] = {}
 
@@ -96,7 +96,12 @@ class DocumentClassifier:
 
         # Find category with highest weighted score
         best_cat, best_score = max(category_scores.items(), key=lambda item: item[1])
-        confidence = round(best_score / total_score, 2)
+        
+        # The percentage of total matched keywords belonging to this category
+        score_share = round(best_score / total_score, 2)
+        
+        # Calibrate absolute confidence (require an absolute score of ~10 for 100% confidence)
+        confidence = min(round(best_score / 10.0, 2), 1.0)
 
         # Apply confidence threshold
         final_category = best_cat if confidence >= self.min_confidence_threshold else "OTHER"
@@ -104,6 +109,7 @@ class DocumentClassifier:
         return {
             "category": final_category,
             "confidence": confidence,
+            "score_share": score_share,
             "scores": {k: round(v, 2) for k, v in category_scores.items()},
             "matched_signals": matched_by_cat.get(best_cat, []),
             "description": f"Classified as '{final_category}' with {int(confidence * 100)}% confidence.",

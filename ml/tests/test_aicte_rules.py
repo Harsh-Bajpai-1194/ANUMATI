@@ -120,3 +120,30 @@ def test_academic_year_target_mismatch():
     ay_rule = next(r for r in result["rules"] if r["rule_id"] == "AICTE-R02-ACADEMIC_YEAR")
     assert ay_rule["status"] == "FAILED"
     assert "does not match target" in ay_rule["details"]
+
+def test_negation_boundary_isolation():
+    """Verify negation on adjacent lines does not bleed into constituted committees."""
+    text = (
+        "Statutory Committees:\n"
+        "1. Anti-Ragging Committee constituted.\n"
+        "2. SC/ST Committee: not available.\n"
+    )
+    # Anti-Ragging should be recognized as formed, not negated by the SC/ST line
+    match_pos = text.lower().find("anti-ragging committee")
+    assert AICTERuleEngine._is_negated(text, match_pos) is False
+
+
+def test_academic_year_format_normalization():
+    """Verify academic year formats (2024-2025, 2024/25, 2024-25) match target."""
+    engine = AICTERuleEngine(target_academic_year="2024-25")
+    
+    # 4-digit to 4-digit format: 2024-2025
+    res1 = engine.evaluate_text("Academic Year 2024-2025 AICTE approval.")
+    r2_1 = next(r for r in res1["rules"] if r["rule_id"] == "AICTE-R02-ACADEMIC_YEAR")
+    assert r2_1["status"] == "PASSED"
+
+    # Slash format: 2024/25
+    res2 = engine.evaluate_text("Academic Session: 2024/25 AICTE approval.")
+    r2_2 = next(r for r in res2["rules"] if r["rule_id"] == "AICTE-R02-ACADEMIC_YEAR")
+    assert r2_2["status"] == "PASSED"
+    
