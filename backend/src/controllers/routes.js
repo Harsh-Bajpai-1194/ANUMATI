@@ -9,14 +9,31 @@ import {
   evaluationHealthCheck
 } from './aiEvaluationController.js';
 
+import { register, login } from './authController.js';
+import { requireAuth, requireRole } from '../middleware/authMiddleware.js';
+import {
+  createApplication,
+  listApplications,
+  getApplicationById,
+  submitApplication,
+  decisionApplication
+} from './applicationController.js';
+
 const router = Router();
+
+// ==========================================
+// Auth & RBAC Routes (Issue #31)
+// ==========================================
+router.post('/auth/register', register);
+router.post('/auth/login', login);
 
 // ==========================================
 // Document Service Routes
 // ==========================================
 router.get('/documents/health', documentHealthCheck);
 
-router.post('/documents/upload', (req, res, next) => {
+// Protected upload route
+router.post('/documents/upload', requireAuth, (req, res, next) => {
   uploadPdf.single('file')(req, res, (err) => {
     if (err) {
       return res.status(400).json({
@@ -32,17 +49,27 @@ router.post('/documents/upload', (req, res, next) => {
 // AI Evaluation & Report Storage Routes (Issue #53)
 // ==========================================
 router.get('/evaluations/health', evaluationHealthCheck);
+router.post('/evaluations', requireAuth, saveEvaluationReport);
+router.post('/evaluations/evaluate', requireAuth, triggerEvaluation);
+router.get('/evaluations/application/:applicationId', requireAuth, getEvaluationsByApplication);
+router.get('/evaluations/:id', requireAuth, getEvaluationRecordById);
 
-// Ingest raw JSON evaluation report into MongoDB
-router.post('/evaluations', saveEvaluationReport);
+// ==========================================
+// Application Lifecycle Routes (Issue #87)
+// ==========================================
+router.post('/applications', requireAuth, createApplication);
+router.get('/applications', requireAuth, listApplications);
+router.get('/applications/:id', requireAuth, getApplicationById);
 
-// Trigger evaluation on ML service and save result
-router.post('/evaluations/evaluate', triggerEvaluation);
+// Applicant Submitting
+router.post('/applications/:id/submit', requireAuth, requireRole(['applicant', 'admin']), submitApplication);
 
-// Retrieve all evaluation reports for an application (for Evaluator Dashboard)
-router.get('/evaluations/application/:applicationId', getEvaluationsByApplication);
-
-// Retrieve a single evaluation report by MongoDB ObjectId
-router.get('/evaluations/:id', getEvaluationRecordById);
+// Evaluator/Admin Decisions
+router.post(
+  '/applications/:id/decision', 
+  requireAuth, 
+  requireRole(['evaluator', 'admin']), 
+  decisionApplication
+);
 
 export default router;
