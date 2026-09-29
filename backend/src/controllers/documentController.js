@@ -18,10 +18,12 @@ export const uploadDocument = async (req, res) => {
 
     const { filename, originalname, size, path: filePath } = req.file;
 
+
     // Validate that the uploaded file path resolves under the expected uploads directory (CodeQL Fix)
     const uploadRoot = path.resolve('uploads');
     const safeFileName = path.basename(filename || filePath);
     const resolvedFilePath = path.resolve(uploadRoot, safeFileName);
+
     if (
       !resolvedFilePath.startsWith(uploadRoot + path.sep) ||
       !fs.existsSync(resolvedFilePath)
@@ -32,6 +34,15 @@ export const uploadDocument = async (req, res) => {
       });
     }
 
+    // Document response object
+    const documentData = {
+      documentId: filename, // interim; becomes the Document uuid after #35
+      originalName: originalname,
+      sizeBytes: size,
+      sizeMb: (size / (1024 * 1024)).toFixed(2),
+      uploadedAt: new Date().toISOString(),
+      status: 'uploaded'
+    };
     // Compute sha256 checksum of physical file (Issue #35)
     const fileBuffer = fs.readFileSync(resolvedFilePath);
     const sha256 = crypto.createHash('sha256').update(fileBuffer).digest('hex');
@@ -128,7 +139,7 @@ export const getDocumentStatus = async (req, res) => {
 export const listDocuments = async (req, res) => {
   try {
     const applicationId = req.params.applicationId || req.query.applicationId;
-    
+
     if (applicationId && !UUID_REGEX.test(applicationId)) {
       return res.status(400).json({ success: false, message: 'Invalid applicationId format.' });
     }
