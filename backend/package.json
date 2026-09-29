@@ -11,7 +11,7 @@
     "db:migrate": "prisma migrate dev",
     "db:studio": "prisma studio",
     "db:test": "node test-db.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node test-ai-evaluation.js"
   },
   "keywords": [],
   "author": "",

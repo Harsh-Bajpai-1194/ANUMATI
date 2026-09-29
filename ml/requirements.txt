@@ -6,3 +6,4 @@ uvicorn
 pydantic
 pytest
 pytesseract
+httpx
