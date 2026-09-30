@@ -1,4 +1,6 @@
-import Document from '../models/Document.js';
+import fs from 'fs';
+import path from 'path';
+import prisma from '../config/db.js';
 import { dispatchAiEvaluation } from './aiEvaluationService.js';
 
 const CONCURRENCY_LIMIT = 2;
@@ -10,45 +12,65 @@ export const enqueueEvaluation = () => {
 
 const processQueue = async () => {
   if (activeCount >= CONCURRENCY_LIMIT) return;
-
-  // Find the oldest pending document and mark it as evaluating
-  const doc = await Document.findOneAndUpdate(
-    { status: 'uploaded' },
-    { $set: { status: 'evaluating' } },
-    { sort: { createdAt: 1 }, returnDocument: 'after' }
-  );
-
-  if (!doc) return;
-
   activeCount++;
-  
+  let claimed = false;
+
   try {
-    const evaluation = await dispatchAiEvaluation(doc.applicationId, doc.filePath);
-    await Document.updateOne(
-      { _id: doc._id },
-      { $set: { status: 'evaluated', aiEvaluationId: evaluation._id } }
-    );
-  } catch (error) {
-    console.error(`Evaluation failed for doc ${doc._id}:`, error);
-    await Document.updateOne(
-      { _id: doc._id },
-      { $set: { status: 'failed', failureReason: error.message } }
-    );
+    // Find the oldest pending document in PostgreSQL (Issue #35)
+    const doc = await prisma.document.findFirst({
+      where: { status: 'uploaded' },
+      orderBy: { createdAt: 'asc' }
+    });
+
+    if (!doc) return;
+
+    // Atomically claim the job: only one worker can flip uploaded -> evaluating
+    const { count } = await prisma.document.updateMany({
+      where: { documentId: doc.documentId, status: 'uploaded' },
+      data: { status: 'evaluating' }
+    });
+
+    if (count !== 1) return; // another worker claimed it
+    claimed = true;
+
+    const uploadDir = path.resolve('uploads');
+    const safeFileName = path.basename(doc.storageKey);
+    const resolvedPath = path.resolve(uploadDir, safeFileName);
+
+    try {
+      const evaluation = await dispatchAiEvaluation(doc.applicationId || 'standalone-doc', resolvedPath);
+      await prisma.document.update({
+        where: { documentId: doc.documentId },
+        data: {
+          status: 'evaluated',
+          mongoAiEvaluationRef: evaluation?._id ? evaluation._id.toString() : null
+        }
+      });
+    } catch (error) {
+      console.error(`Evaluation failed for doc ${doc.documentId}:`, error);
+      await prisma.document.update({
+        where: { documentId: doc.documentId },
+        data: { status: 'failed' }
+      });
+    }
+  } catch (err) {
+    console.error('Error in evaluation queue processing:', err);
   } finally {
     activeCount--;
-    // Immediately check if there are more jobs pending in the queue
-    setImmediate(processQueue);
+    if (claimed) {
+      setImmediate(processQueue);
+    }
   }
 };
 
 export const resumeStuckEvaluations = async () => {
   try {
-    const result = await Document.updateMany(
-      { status: 'evaluating' },
-      { $set: { status: 'uploaded' } }
-    );
-    if (result.modifiedCount > 0) {
-      console.log(`Re-queued ${result.modifiedCount} stuck document evaluations.`);
+    const result = await prisma.document.updateMany({
+      where: { status: 'evaluating' },
+      data: { status: 'uploaded' }
+    });
+    if (result.count > 0) {
+      console.log(`Re-queued ${result.count} stuck document evaluations.`);
       for (let i = 0; i < CONCURRENCY_LIMIT; i++) {
         setImmediate(processQueue);
       }

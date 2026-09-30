@@ -1,5 +1,4 @@
 import express from 'express';
-import path from 'path';
 import apiRoutes from './controllers/routes.js';
 import dotenv from 'dotenv';
 import helmet from 'helmet';
@@ -17,7 +16,7 @@ app.use(helmet());
 app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:8080' }));
 app.use(express.json({ limit: '2mb' }));
 
-app.use('/uploads', express.static(path.resolve('uploads'))); 
+// Note: /uploads static directory is deliberately NOT exposed publicly (Security Issue #81)
 app.use('/api', apiRoutes);
 
 app.get('/', (req, res) => {
