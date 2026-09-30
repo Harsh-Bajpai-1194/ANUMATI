@@ -36,14 +36,14 @@ const PdfUploadComponent = () => {
       return;
     }
 
-    // Inspect first 5 bytes for magic header %PDF- with token cancellation
-    const headerSlice = file.slice(0, 5);
+    // Inspect the first 1,024 bytes for the %PDF- magic header with token cancellation
+    const headerSlice = file.slice(0, 1024);
     const reader = new FileReader();
     reader.onloadend = (e) => {
       if (token !== readTokenRef.current) return;
       const arr = new Uint8Array(e.target.result);
       const headerStr = String.fromCharCode(...arr);
-      if (!headerStr.startsWith('%PDF-')) {
+      if (!headerStr.includes('%PDF-')) {
         setErrorMessage('Security Warning: File content does not match a valid PDF signature.');
         resetInput();
         return;

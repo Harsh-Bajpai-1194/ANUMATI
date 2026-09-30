@@ -29,9 +29,10 @@ app.post('/api/documents/upload-test', (req, res, next) => {
     filename: req.file.filename
   });
 
-  // Safe cleanup: CodeQL validated path containment
-  if (req.file?.path) {
-    const resolvedPath = path.resolve(req.file.path);
+  // Safe cleanup: sanitize with path.basename and verify uploadDir containment
+  if (req.file?.filename || req.file?.path) {
+    const safeFileName = path.basename(req.file.filename || req.file.path);
+    const resolvedPath = path.resolve(uploadDir, safeFileName);
     if (resolvedPath.startsWith(uploadDir + path.sep) && fs.existsSync(resolvedPath)) {
       fs.unlinkSync(resolvedPath);
     }
