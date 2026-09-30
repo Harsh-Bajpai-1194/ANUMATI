@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { uploadPdf } from '../middleware/middleware.js';
-import { uploadDocument, documentHealthCheck } from './documentController.js';
+import { uploadDocument, documentHealthCheck, getDocumentStatus } from './documentController.js';
 import {
   saveEvaluationReport,
   triggerEvaluation,
@@ -11,7 +11,7 @@ import {
 } from './aiEvaluationController.js';
 
 import { register, login } from './authController.js';
-import { requireAuth, requireRole } from '../middleware/authMiddleware.js';
+import { requireAuth, optionalAuth, requireRole } from '../middleware/authMiddleware.js';
 import {
   createApplication,
   listApplications,
@@ -22,9 +22,8 @@ import {
 
 const router = Router();
 
-// CodeQL Fix: Apply a generic rate limiter to satisfy missing rate limiting security checks
 const apiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
+  windowMs: 15 * 60 * 1000, 
   max: 100,
   standardHeaders: true,
   legacyHeaders: false,
@@ -42,8 +41,8 @@ router.post('/auth/login', login);
 // ==========================================
 router.get('/documents/health', documentHealthCheck);
 
-// Protected upload route
-router.post('/documents/upload', requireAuth, (req, res, next) => {
+// Upload route with optionalAuth: works with or without JWT token
+router.post('/documents/upload', optionalAuth, (req, res, next) => {
   uploadPdf.single('file')(req, res, (err) => {
     if (err) {
       return res.status(400).json({
@@ -54,6 +53,9 @@ router.post('/documents/upload', requireAuth, (req, res, next) => {
     next();
   });
 }, uploadDocument);
+
+// Get document polling status (Issue #85)
+router.get('/documents/:id', optionalAuth, getDocumentStatus);
 
 // ==========================================
 // AI Evaluation & Report Storage Routes (Issue #53)
@@ -67,15 +69,12 @@ router.get('/evaluations/:id', requireAuth, getEvaluationRecordById);
 // ==========================================
 // Application Lifecycle Routes (Issue #87)
 // ==========================================
-// CodeRabbit Fix: Added requireRole check for applicant creation
 router.post('/applications', requireAuth, requireRole(['applicant', 'admin']), createApplication);
 router.get('/applications', requireAuth, listApplications);
 router.get('/applications/:id', requireAuth, getApplicationById);
 
-// Applicant Submitting
 router.post('/applications/:id/submit', requireAuth, requireRole(['applicant', 'admin']), submitApplication);
 
-// Evaluator/Admin Decisions
 router.post(
   '/applications/:id/decision', 
   requireAuth, 

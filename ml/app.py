@@ -188,7 +188,11 @@ async def evaluate_document(
 ):
     import asyncio
     
-    ALLOWED_ROOTS = [UPLOAD_FOLDER.resolve()]
+    ALLOWED_ROOTS = [
+        UPLOAD_FOLDER.resolve(),
+        (UPLOAD_FOLDER.parent.parent / "backend" / "uploads").resolve(),
+        (UPLOAD_FOLDER.parent.parent / "uploads").resolve(),
+    ]
     
     def check_safe_path(target: Path):
         normalized_target = target.resolve(strict=False)

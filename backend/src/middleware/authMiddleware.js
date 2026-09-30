@@ -27,6 +27,29 @@ export const requireAuth = async (req, res, next) => {
   }
 };
 
+export const optionalAuth = async (req, res, next) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return next();
+    }
+
+    const token = authHeader.split(' ')[1];
+    const decoded = jwt.verify(token, JWT_SECRET);
+
+    const user = await prisma.user.findUnique({
+      where: { userId: decoded.userId }
+    });
+
+    if (user) {
+      req.user = user;
+    }
+  } catch (error) {
+    // Ignore invalid token for optional auth
+  }
+  next();
+};
+
 export const requireRole = (roles) => {
   return (req, res, next) => {
     if (!req.user || !roles.includes(req.user.role)) {

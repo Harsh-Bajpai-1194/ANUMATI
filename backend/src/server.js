@@ -6,21 +6,18 @@ import helmet from 'helmet';
 import cors from 'cors';
 import prisma from './config/db.js';
 import connectMongoDB, { disconnectMongoDB } from './config/mongo.js';
+import { resumeStuckEvaluations } from './services/evaluationQueue.js';
 
 dotenv.config();
 
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Middleware
 app.use(helmet());
 app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:8080' }));
 app.use(express.json({ limit: '2mb' }));
 
-// Serve uploaded files statically
 app.use('/uploads', express.static(path.resolve('uploads'))); 
-
-// Mount API routes.
 app.use('/api', apiRoutes);
 
 app.get('/', (req, res) => {
@@ -33,15 +30,16 @@ const startServer = async () => {
     await prisma.$connect();
     console.log('PostgreSQL Connected via Prisma');
 
+    // Resume stuck evaluations on startup (Issue #85)
+    await resumeStuckEvaluations();
+
     const server = app.listen(port, () => {
       console.log(`Server is listening on http://localhost:${port}`);
     });
 
-    // Graceful Shutdown Logic
     const shutdown = async () => {
       console.log('\nShutting down gracefully...');
 
-      // Force shutdown if requests take longer than 10 seconds to finish
       setTimeout(() => {
         console.error('Could not close connections in time, forcefully shutting down.');
         process.exit(1);
@@ -61,8 +59,8 @@ const startServer = async () => {
       });
     };
 
-    process.on('SIGINT', shutdown);  // Catch Ctrl+C
-    process.on('SIGTERM', shutdown); // Catch Docker/PM2 stop
+    process.on('SIGINT', shutdown);  
+    process.on('SIGTERM', shutdown); 
 
   } catch (error) {
     console.error('Failed to initialize server:', error);
