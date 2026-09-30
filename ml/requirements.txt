@@ -8,3 +8,4 @@ pytest
 pytesseract
 httpx
 numpy
+python-multipart

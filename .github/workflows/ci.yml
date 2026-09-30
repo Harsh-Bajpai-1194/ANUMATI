@@ -41,6 +41,9 @@ jobs:
       - name: Run ML tests with pytest
         run: |
           python -m pytest tests/ -v
+        env:
+          ENVIRONMENT: test
+          ML_INTERNAL_TOKEN: "dev-secret-internal-token-change-in-production"
 
   # ==========================================
   # 2. Backend Job (Node 20 + MongoDB + Prisma)
@@ -85,8 +88,10 @@ jobs:
       - name: Run Backend Evaluation Tests
         run: npm test
         env:
+          NODE_ENV: test
           MONGODB_URI: "mongodb://127.0.0.1:27017/anumati_test"
           JWT_SECRET: "test_secret_for_ci_pipeline"
+          ML_INTERNAL_TOKEN: "dev-secret-internal-token-change-in-production"
 
   # ==========================================
   # 3. Frontend Job (Node 20 + Webpack Build)
@@ -114,3 +119,4 @@ jobs:
 
       - name: Build frontend production bundle
         run: npm run build
+        
