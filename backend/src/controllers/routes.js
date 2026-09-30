@@ -48,8 +48,8 @@ router.post('/auth/login', login);
 router.get('/documents/health', documentHealthCheck);
 
 // List documents from API
-router.get('/documents', optionalAuth, listDocuments);
-router.get('/documents/application/:applicationId', optionalAuth, listDocuments);
+router.get('/documents', requireAuth, listDocuments);
+router.get('/documents/application/:applicationId', requireAuth, listDocuments);
 
 // Upload route with optionalAuth, Multer, and content-based %PDF- validation
 router.post('/documents/upload', optionalAuth, (req, res, next) => {
@@ -68,7 +68,7 @@ router.post('/documents/upload', optionalAuth, (req, res, next) => {
 router.get('/documents/:id', optionalAuth, getDocumentStatus);
 
 // Delete document and physical file (Issue #35)
-router.delete('/documents/:id', optionalAuth, deleteDocument);
+router.delete('/documents/:id', requireAuth, deleteDocument);
 
 // ==========================================
 // AI Evaluation & Report Storage Routes (Issue #53)

@@ -5,6 +5,8 @@ import prisma from '../config/db.js';
 import { enqueueEvaluation } from '../services/evaluationQueue.js';
 import AiEvaluation from '../models/AiEvaluation.js';
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 export const uploadDocument = async (req, res) => {
   try {
     if (!req.file) {
@@ -37,15 +39,18 @@ export const uploadDocument = async (req, res) => {
     // Validate UUID format if an applicationId is provided
     let validApplicationId = null;
     if (req.body.applicationId) {
-      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-      if (uuidRegex.test(req.body.applicationId)) {
-        const existingApp = await prisma.application.findUnique({
-          where: { applicationId: req.body.applicationId }
-        });
-        if (existingApp) {
-          validApplicationId = req.body.applicationId;
-        }
+      if (!UUID_REGEX.test(req.body.applicationId)) {
+        if (fs.existsSync(resolvedFilePath)) fs.unlinkSync(resolvedFilePath);
+        return res.status(400).json({ success: false, message: 'Invalid applicationId.' });
       }
+      const existingApp = await prisma.application.findUnique({
+        where: { applicationId: req.body.applicationId }
+      });
+      if (!existingApp || !req.user || existingApp.institutionId !== req.user.institutionId) {
+        if (fs.existsSync(resolvedFilePath)) fs.unlinkSync(resolvedFilePath);
+        return res.status(403).json({ success: false, message: 'You cannot attach documents to this application.' });
+      }
+      validApplicationId = existingApp.applicationId;
     }
 
     // Persist document metadata in PostgreSQL via Prisma (Issue #35)
@@ -91,6 +96,10 @@ export const getDocumentStatus = async (req, res) => {
   try {
     const { id } = req.params;
 
+    if (!UUID_REGEX.test(id)) {
+      return res.status(404).json({ success: false, message: 'Document not found.' });
+    }
+
     const doc = await prisma.document.findUnique({
       where: { documentId: id },
       select: {
@@ -119,11 +128,22 @@ export const getDocumentStatus = async (req, res) => {
 export const listDocuments = async (req, res) => {
   try {
     const applicationId = req.params.applicationId || req.query.applicationId;
+    
+    if (applicationId && !UUID_REGEX.test(applicationId)) {
+      return res.status(400).json({ success: false, message: 'Invalid applicationId format.' });
+    }
+
+    if (!req.user) {
+      return res.status(401).json({ success: false, message: 'Authentication required.' });
+    }
+
+    const isPrivileged = ['evaluator', 'admin'].includes(req.user.role);
     const where = {};
 
     if (applicationId) {
       where.applicationId = applicationId;
-    } else if (req.user?.role === 'applicant' && req.user?.userId) {
+    }
+    if (!isPrivileged) {
       where.uploadedBy = req.user.userId;
     }
 
@@ -153,6 +173,10 @@ export const deleteDocument = async (req, res) => {
   try {
     const { id } = req.params;
 
+    if (!UUID_REGEX.test(id)) {
+      return res.status(404).json({ success: false, message: 'Document not found.' });
+    }
+
     const doc = await prisma.document.findUnique({
       where: { documentId: id }
     });
@@ -161,8 +185,11 @@ export const deleteDocument = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Document not found.' });
     }
 
-    // Role-based authorization: applicant can only delete own documents
-    if (req.user && req.user.role === 'applicant' && doc.uploadedBy && doc.uploadedBy !== req.user.userId) {
+    if (!req.user) {
+      return res.status(401).json({ success: false, message: 'Authentication required.' });
+    }
+    const isPrivileged = req.user.role === 'admin';
+    if (!isPrivileged && doc.uploadedBy !== req.user.userId) {
       return res.status(403).json({ success: false, message: 'Forbidden: You can only delete your own documents.' });
     }
 

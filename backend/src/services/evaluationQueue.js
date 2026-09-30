@@ -12,6 +12,8 @@ export const enqueueEvaluation = () => {
 
 const processQueue = async () => {
   if (activeCount >= CONCURRENCY_LIMIT) return;
+  activeCount++;
+  let claimed = false;
 
   try {
     // Find the oldest pending document in PostgreSQL (Issue #35)
@@ -22,13 +24,14 @@ const processQueue = async () => {
 
     if (!doc) return;
 
-    // Atomically claim the job
-    await prisma.document.update({
-      where: { documentId: doc.documentId },
+    // Atomically claim the job: only one worker can flip uploaded -> evaluating
+    const { count } = await prisma.document.updateMany({
+      where: { documentId: doc.documentId, status: 'uploaded' },
       data: { status: 'evaluating' }
     });
 
-    activeCount++;
+    if (count !== 1) return; // another worker claimed it
+    claimed = true;
 
     const uploadDir = path.resolve('uploads');
     const safeFileName = path.basename(doc.storageKey);
@@ -49,12 +52,14 @@ const processQueue = async () => {
         where: { documentId: doc.documentId },
         data: { status: 'failed' }
       });
-    } finally {
-      activeCount--;
-      setImmediate(processQueue);
     }
   } catch (err) {
     console.error('Error in evaluation queue processing:', err);
+  } finally {
+    activeCount--;
+    if (claimed) {
+      setImmediate(processQueue);
+    }
   }
 };
 
