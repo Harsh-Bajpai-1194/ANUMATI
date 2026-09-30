@@ -20,12 +20,26 @@ from src.signature.signature_detector import SignatureDetector
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("anumati-ml")
 
-# Internal Shared Secret Authentication (Issue #83)
-ENVIRONMENT = os.getenv("ENV", os.getenv("ENVIRONMENT", "development")).lower()
-ML_INTERNAL_TOKEN = os.getenv("ML_INTERNAL_TOKEN", "dev-secret-internal-token-change-in-production")
+# Internal Shared Secret Authentication (Issue #83, CodeRabbit CWE-1392)
+ENVIRONMENT = os.getenv("ENV", os.getenv("ENVIRONMENT", os.getenv("NODE_ENV", ""))).lower()
+IS_EXPLICIT_DEV = ENVIRONMENT in ("development", "dev", "local", "test")
 
-if ENVIRONMENT == "production" and (not os.getenv("ML_INTERNAL_TOKEN") or ML_INTERNAL_TOKEN == "dev-secret-internal-token-change-in-production"):
-    raise RuntimeError("FATAL: ML_INTERNAL_TOKEN must be explicitly configured in production environment!")
+ML_INTERNAL_TOKEN = os.getenv("ML_INTERNAL_TOKEN")
+if not ML_INTERNAL_TOKEN:
+    if IS_EXPLICIT_DEV:
+        ML_INTERNAL_TOKEN = "dev-secret-internal-token-change-in-production"
+    else:
+        raise RuntimeError(
+            "FATAL: ML_INTERNAL_TOKEN must be explicitly configured when not running in development mode!"
+        )
+
+if not IS_EXPLICIT_DEV and ML_INTERNAL_TOKEN == "dev-secret-internal-token-change-in-production":
+    raise RuntimeError(
+        "FATAL: ML_INTERNAL_TOKEN cannot use the default secret in non-development environments!"
+    )
+
+if not ML_INTERNAL_TOKEN.isascii():
+    raise RuntimeError("FATAL: ML_INTERNAL_TOKEN must contain only ASCII characters.")
 
 app = FastAPI(
     title="ANUMATI ML & Document Evaluation Microservice",
@@ -197,8 +211,12 @@ async def evaluate_document(
     targetAcademicYear: Optional[str] = Form(None),
     x_internal_token: Optional[str] = Header(None, alias="X-Internal-Token")
 ):
-    # Constant-time comparison to prevent timing attacks (Issue #83)
-    if not x_internal_token or not secrets.compare_digest(x_internal_token, ML_INTERNAL_TOKEN):
+    # Constant-time comparison & ASCII check to prevent timing attacks and 500s (Issue #83, CodeRabbit)
+    if (
+        not x_internal_token
+        or not x_internal_token.isascii()
+        or not secrets.compare_digest(x_internal_token, ML_INTERNAL_TOKEN)
+    ):
         raise HTTPException(
             status_code=401,
             detail="Unauthorized: Missing or invalid X-Internal-Token header."

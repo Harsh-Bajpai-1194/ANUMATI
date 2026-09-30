@@ -1,6 +1,11 @@
 import io
+import os
 import pytest
 from fastapi.testclient import TestClient
+
+# Ensure explicit test environment for test execution
+os.environ.setdefault("ENVIRONMENT", "test")
+os.environ.setdefault("ML_INTERNAL_TOKEN", "dev-secret-internal-token-change-in-production")
 
 try:
     import pymupdf as fitz
@@ -64,6 +69,16 @@ def test_evaluate_wrong_token_returns_401(sample_pdf_bytes):
     response = client.post(
         "/evaluate",
         headers={"X-Internal-Token": "invalid-token"},
+        files={"file": ("institution_approval.pdf", sample_pdf_bytes, "application/pdf")}
+    )
+    assert response.status_code == 401
+    assert "Unauthorized" in response.json()["detail"]
+
+
+def test_evaluate_non_ascii_token_returns_401(sample_pdf_bytes):
+    response = client.post(
+        "/evaluate",
+        headers={"X-Internal-Token": "invalid-token-\xe9"},
         files={"file": ("institution_approval.pdf", sample_pdf_bytes, "application/pdf")}
     )
     assert response.status_code == 401
