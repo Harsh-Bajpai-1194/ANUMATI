@@ -5,8 +5,10 @@ const aiEvaluationSchema = new mongoose.Schema({
     type: String,
     required: true,
     index: true
-    // NOTE: This is a reference to the Application ID in PostgreSQL.
-    // Ensure integrity at the API routing level.
+  },
+  complianceScore: {
+    type: Number,
+    default: 0
   },
   extractedTextMetadata: {
     ocrConfidenceScore: Number,
@@ -14,7 +16,6 @@ const aiEvaluationSchema = new mongoose.Schema({
   },
   anomalyDetection: {
     flagged: { type: Boolean, default: false },
-    confidence: Number,
     flags: [{
       ruleCode: String,
       description: String,

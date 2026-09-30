@@ -19,17 +19,10 @@ except ImportError:
 
 
 class OCREngineError(Exception):
-    """Exception raised for unrecoverable errors during OCR and text extraction."""
     pass
 
 
 class OCREngine:
-    """
-    Hybrid Document Text Extraction Engine.
-    Combines direct digital layer extraction with optical character recognition (OCR)
-    for scanned or low-density pages.
-    """
-
     def __init__(
         self,
         min_words_threshold: int = 15,
@@ -37,36 +30,32 @@ class OCREngine:
         preprocessor: Optional[ImagePreprocessor] = None,
         apply_binarization: bool = False,
     ):
-        """
-        Parameters:
-            min_words_threshold (int): Minimum digital words required per page to consider it a
-                readable digital PDF. Pages with fewer words (typically only carrying headers/footers
-                or scanned bodies) trigger OCR fallback. Default is 15.
-            dpi (int): DPI resolution for page rendering if OCR fallback is needed.
-            preprocessor (Optional[ImagePreprocessor]): Preprocessor instance for OCR images.
-            apply_binarization (bool): Whether to hard-threshold OCR images to 1-bit. Default False
-                allows Tesseract's internal adaptive thresholding on grayscale images.
-        """
         self.min_words_threshold = min_words_threshold
         self.dpi = dpi
         self.preprocessor = preprocessor or ImagePreprocessor()
         self.apply_binarization = apply_binarization
 
-    def _run_tesseract(self, img: Image.Image) -> str:
+    def _run_tesseract(self, img: Image.Image) -> tuple[str, float]:
         if not PYTESSERACT_AVAILABLE or pytesseract is None:
             logger.warning("pytesseract is not installed; scanned page OCR fallback is skipped.")
-            return ""
+            return "", 0.0
 
         try:
             processed_img = self.preprocessor.preprocess(
                 img,
                 apply_binarization=self.apply_binarization
             )
+            # Fetch actual word confidences
+            data = pytesseract.image_to_data(processed_img, output_type=pytesseract.Output.DICT)
+            confidences = [int(conf) for conf in data['conf'] if int(conf) != -1]
+            
             text = pytesseract.image_to_string(processed_img)
-            return text.strip()
+            avg_conf = sum(confidences) / len(confidences) if confidences else 0.0
+            
+            return text.strip(), (avg_conf / 100.0)
         except Exception as exc:
             logger.warning(f"Tesseract OCR execution failed: {exc}")
-            return ""
+            return "", 0.0
 
     def process_document(
         self,
@@ -74,10 +63,6 @@ class OCREngine:
         document_name: Optional[str] = None,
         save_text_file: bool = True
     ) -> Dict[str, Any]:
-        """
-        Extract text from all pages using the hybrid strategy.
-        Accepts PDFReader, file path, raw bytes, or io.BytesIO stream.
-        """
         if isinstance(reader_or_source, PDFReader):
             reader = reader_or_source
         elif isinstance(reader_or_source, (str, Path, bytes, io.BytesIO)):
@@ -99,25 +84,23 @@ class OCREngine:
                     page = pdf[page_idx]
                     page_number = page_idx + 1
 
-                    # 1. Digital text extraction
                     digital_text = page.get_text().strip()
                     words = len(digital_text.split())
                     final_page_text = digital_text
                     method = "digital_text_layer"
+                    ocr_conf = None
 
-                    # 2. If text is sparse, trigger OCR fallback via _run_tesseract
                     if words < self.min_words_threshold:
                         ocr_text = ""
                         try:
                             pix = page.get_pixmap(dpi=self.dpi)
                             img = Image.open(io.BytesIO(pix.tobytes("png")))
-                            ocr_text = self._run_tesseract(img)
+                            ocr_text, ocr_conf = self._run_tesseract(img)
                         except Exception as exc:
                             logger.warning(
                                 f"OCR pipeline failed on page {page_number} of '{reader.document_name}': {exc}"
                             )
 
-                        # Integrate OCR while preserving digital text tokens
                         if ocr_text:
                             ocr_words = len(ocr_text.split())
                             if ocr_words > words:
@@ -153,13 +136,13 @@ class OCREngine:
                         "method": method,
                         "text": final_page_text,
                         "digital_text": digital_text,
+                        "ocr_confidence": ocr_conf if method == "ocr_fallback" else None
                     })
         except Exception as exc:
             if not isinstance(exc, OCREngineError):
                 raise OCREngineError(f"Document OCR extraction interrupted: {exc}") from exc
             raise
 
-        # Determine overall method
         if used_digital and used_ocr:
             overall_method = "hybrid"
         elif used_ocr:
@@ -169,9 +152,11 @@ class OCREngine:
         else:
             overall_method = "unreadable_or_empty"
 
+        valid_confs = [p["ocr_confidence"] for p in pages_result if p.get("ocr_confidence") is not None]
+        mean_ocr_conf = sum(valid_confs) / len(valid_confs) if valid_confs else None
+
         full_text = "\n\n".join([p["text"] for p in pages_result if p["text"]])
 
-        # Save to isolated path: outputs/text/<doc_stem>/<uuid>/extracted_text.txt
         text_file_path = None
         if save_text_file:
             import uuid
@@ -187,6 +172,7 @@ class OCREngine:
             "total_characters": total_chars,
             "extraction_method": overall_method,
             "ocr_engine_available": PYTESSERACT_AVAILABLE,
+            "ocr_confidence": mean_ocr_conf,
             "text_file_path": str(text_file_path) if text_file_path else None,
             "pages": pages_result,
             "full_text": full_text,

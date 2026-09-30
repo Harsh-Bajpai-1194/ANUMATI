@@ -91,11 +91,12 @@ class VerificationPipeline:
                 "file_size_bytes": reader.get_metadata().get("file_size_bytes", 0),
                 "is_encrypted": reader.get_metadata().get("is_encrypted", False),
             },
-                        "text_extraction": {
+            "text_extraction": {
                 "method": extraction_result["extraction_method"],
                 "total_words": extraction_result["total_words"],
                 "total_characters": extraction_result["total_characters"],
                 "ocr_engine_available": extraction_result["ocr_engine_available"],
+                "ocr_confidence": extraction_result.get("ocr_confidence"),
                 "text_file_path": extraction_result.get("text_file_path"),
                 "full_text": full_extracted_text,  # Pass extracted text directly in-memory
                 "pages_preview": [
@@ -127,7 +128,6 @@ class VerificationPipeline:
         if save_report:
             REPORT_FOLDER.mkdir(parents=True, exist_ok=True)
 
-            # Prevent overwriting when distinct documents share the same basename
             if reader.pdf_path:
                 doc_id = hashlib.sha256(str(reader.pdf_path.resolve()).encode("utf-8")).hexdigest()[:8]
             elif reader.stream_bytes:
@@ -138,7 +138,6 @@ class VerificationPipeline:
             report_filename = f"{doc_stem}_{doc_id}_verification.json" if doc_id else f"{doc_stem}_verification.json"
             report_path = REPORT_FOLDER / report_filename
 
-            # Include report_file_path in metadata before writing so saved JSON contains it
             report["verification_metadata"]["report_file_path"] = str(report_path)
             report_path.write_text(
                 json.dumps(report, indent=2, ensure_ascii=False),

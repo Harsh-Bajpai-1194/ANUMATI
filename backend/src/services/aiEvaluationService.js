@@ -6,11 +6,6 @@ const ML_REQUEST_TIMEOUT_MS = parseInt(process.env.ML_REQUEST_TIMEOUT_MS, 10) ||
 
 const VALID_SEVERITIES = new Set(['low', 'medium', 'high', 'critical']);
 
-/**
- * Normalizes rule violation / anomaly flags to match AiEvaluation schema
- * @param {Array} rawFlags
- * @returns {Array} normalized flags
- */
 const normalizeFlags = (rawFlags = []) => {
   if (!Array.isArray(rawFlags)) return [];
 
@@ -28,13 +23,6 @@ const normalizeFlags = (rawFlags = []) => {
   });
 };
 
-/**
- * Parses raw AI JSON report data and persists it to the MongoDB AiEvaluation collection.
- * 
- * @param {string} applicationId - PostgreSQL application ID or document reference
- * @param {Object} rawReport - Full JSON verification report from ML service
- * @returns {Promise<Object>} Saved Mongoose AiEvaluation document
- */
 export const parseAndStoreAiReport = async (applicationId, rawReport) => {
   if (!applicationId || typeof applicationId !== 'string') {
     throw new Error('A valid applicationId string is required to store an AI evaluation report.');
@@ -44,7 +32,6 @@ export const parseAndStoreAiReport = async (applicationId, rawReport) => {
     throw new Error('A valid JSON report object is required.');
   }
 
-  // Reject incomplete or failed evaluation reports
   if (rawReport.status && rawReport.status !== 'completed' && rawReport.status !== 'success') {
     throw new Error(`Cannot store evaluation with incomplete status: "${rawReport.status}".`);
   }
@@ -56,33 +43,31 @@ export const parseAndStoreAiReport = async (applicationId, rawReport) => {
     throw new Error('Invalid evaluation report: Missing required text extraction and anomaly detection fields.');
   }
 
-  // Extract text metadata (supports both ML service schema and legacy schema)
   const ocrConfidenceScore =
-    rawReport.textExtraction?.extractionQualityScore ??
+    rawReport.textExtraction?.ocrConfidenceScore ??
     rawReport.extractedTextMetadata?.ocrConfidenceScore ??
-    0;
+    null;
 
   const extractedEntities =
     rawReport.textExtraction?.extractedEntities ??
     rawReport.extractedTextMetadata?.extractedEntities ??
     {};
 
-  // Extract anomaly flags & detection metadata
   const anomalySource = rawReport.anomalyDetection || {};
   const isFlagged = Boolean(anomalySource.flagged);
-  const confidence = typeof anomalySource.confidence === 'number' ? anomalySource.confidence : 0;
   const flags = normalizeFlags(anomalySource.flags);
+  
+  const complianceScore = typeof rawReport.complianceScore === 'number' ? rawReport.complianceScore : 0;
 
-  // Build and save Mongoose document
   const evaluationDocument = new AiEvaluation({
     applicationId: applicationId.trim(),
+    complianceScore,
     extractedTextMetadata: {
       ocrConfidenceScore,
       extractedEntities
     },
     anomalyDetection: {
       flagged: isFlagged,
-      confidence,
       flags
     },
     rawModelResponse: rawReport
@@ -93,13 +78,6 @@ export const parseAndStoreAiReport = async (applicationId, rawReport) => {
   return savedRecord;
 };
 
-/**
- * Dispatches an uploaded document to FastAPI ML service and saves result in MongoDB
- * 
- * @param {string} applicationId - Application or Document identifier
- * @param {string} filePath - Path to the PDF document
- * @returns {Promise<Object>} Saved AiEvaluation document
- */
 export const dispatchAiEvaluation = async (applicationId, filePath) => {
   const absolutePath = path.resolve(filePath);
 
@@ -140,21 +118,11 @@ export const dispatchAiEvaluation = async (applicationId, filePath) => {
   }
 };
 
-/**
- * Retrieves AI evaluations for a specific application ID (newest first)
- * @param {string} applicationId 
- * @returns {Promise<Array>} Array of AiEvaluation documents
- */
 export const getAiEvaluationByApplicationId = async (applicationId) => {
   if (!applicationId) throw new Error('applicationId parameter is required.');
   return await AiEvaluation.find({ applicationId }).sort({ createdAt: -1 }).lean();
 };
 
-/**
- * Retrieves a single AI evaluation report by its MongoDB ObjectId
- * @param {string} id 
- * @returns {Promise<Object|null>} AiEvaluation document or null
- */
 export const getAiEvaluationById = async (id) => {
   if (!id) throw new Error('Evaluation ID parameter is required.');
   return await AiEvaluation.findById(id).lean();
