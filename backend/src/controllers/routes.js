@@ -1,7 +1,13 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { uploadPdf, validatePdfContent } from '../middleware/middleware.js';
-import { uploadDocument, documentHealthCheck, getDocumentStatus } from './documentController.js';
+import {
+  uploadDocument,
+  documentHealthCheck,
+  getDocumentStatus,
+  listDocuments,
+  deleteDocument
+} from './documentController.js';
 import {
   saveEvaluationReport,
   triggerEvaluation,
@@ -37,9 +43,13 @@ router.post('/auth/register', register);
 router.post('/auth/login', login);
 
 // ==========================================
-// Document Service Routes
+// Document Service Routes (Issues #25, #35, #81)
 // ==========================================
 router.get('/documents/health', documentHealthCheck);
+
+// List documents from API
+router.get('/documents', optionalAuth, listDocuments);
+router.get('/documents/application/:applicationId', optionalAuth, listDocuments);
 
 // Upload route with optionalAuth, Multer, and content-based %PDF- validation
 router.post('/documents/upload', optionalAuth, (req, res, next) => {
@@ -56,6 +66,9 @@ router.post('/documents/upload', optionalAuth, (req, res, next) => {
 
 // Get document polling status (Issue #85)
 router.get('/documents/:id', optionalAuth, getDocumentStatus);
+
+// Delete document and physical file (Issue #35)
+router.delete('/documents/:id', optionalAuth, deleteDocument);
 
 // ==========================================
 // AI Evaluation & Report Storage Routes (Issue #53)

@@ -31,6 +31,13 @@ enum ApplicationType {
   hibernation
 }
 
+enum DocStatus {
+  uploaded
+  evaluating
+  evaluated
+  failed
+}
+
 model User {
   userId        String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("user_id")
   fullName      String       @map("full_name")
@@ -42,9 +49,9 @@ model User {
   institution   Institution? @relation("UserInstitution", fields: [institutionId], references: [institutionId])
 
   // Inverse relations
-  primaryContactFor Institution[]         @relation("PrimaryContact")
-  submittedApplications Application[]      @relation("ApplicationSubmitter")
-  statusLogs    ApplicationStatusLog[]
+  primaryContactFor     Institution[]         @relation("PrimaryContact")
+  submittedApplications Application[]         @relation("ApplicationSubmitter")
+  statusLogs            ApplicationStatusLog[]
 
   createdAt     DateTime     @default(now()) @map("created_at")
 
@@ -82,12 +89,30 @@ model Application {
   submittedBy         String?                @db.Uuid @map("submitted_by")
   submitter           User?                  @relation("ApplicationSubmitter", fields: [submittedBy], references: [userId])
 
+  documents           Document[]
   statusLogs          ApplicationStatusLog[]
   createdAt           DateTime               @default(now()) @map("created_at")
 
   @@index([institutionId])
   @@map("applications")
   @@unique([institutionId, academicYear, applicationType])
+}
+
+model Document {
+  documentId           String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid @map("document_id")
+  applicationId        String?      @db.Uuid @map("application_id")
+  application          Application? @relation(fields: [applicationId], references: [applicationId], onDelete: Cascade)
+  originalName         String       @map("original_name")
+  storageKey           String       @unique @map("storage_key")
+  sha256               String
+  sizeBytes            Int          @map("size_bytes")
+  status               DocStatus    @default(uploaded)
+  uploadedBy           String?      @db.Uuid @map("uploaded_by")
+  mongoAiEvaluationRef String?      @map("mongo_ai_evaluation_ref")
+  createdAt            DateTime     @default(now()) @map("created_at")
+
+  @@index([applicationId])
+  @@map("documents")
 }
 
 model ApplicationStatusLog {
