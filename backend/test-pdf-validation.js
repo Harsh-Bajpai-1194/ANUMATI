@@ -1,8 +1,21 @@
 import express from 'express';
 import fs from 'fs';
+import path from 'path';
+import rateLimit from 'express-rate-limit';
 import { uploadPdf, validatePdfContent } from './src/middleware/middleware.js';
 
 const app = express();
+
+// CodeQL Fix: Apply rate limiter to test endpoint
+const uploadTestLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use(uploadTestLimiter);
+
+const uploadDir = path.resolve('uploads');
 
 app.post('/api/documents/upload-test', (req, res, next) => {
   uploadPdf.single('file')(req, res, (err) => {
@@ -15,9 +28,13 @@ app.post('/api/documents/upload-test', (req, res, next) => {
     message: 'Valid PDF accepted.',
     filename: req.file.filename
   });
-  // Cleanup valid uploaded test file from disk
-  if (req.file && fs.existsSync(req.file.path)) {
-    fs.unlinkSync(req.file.path);
+
+  // Safe cleanup: CodeQL validated path containment
+  if (req.file?.path) {
+    const resolvedPath = path.resolve(req.file.path);
+    if (resolvedPath.startsWith(uploadDir + path.sep) && fs.existsSync(resolvedPath)) {
+      fs.unlinkSync(resolvedPath);
+    }
   }
 });
 
@@ -29,9 +46,7 @@ const runTests = async () => {
   const targetUrl = `http://127.0.0.1:${port}/api/documents/upload-test`;
 
   try {
-    // -------------------------------------------------------------
     // Test 1: Non-PDF file with spoofed application/pdf header -> 400 + file removed
-    // -------------------------------------------------------------
     console.log('\n1. Testing non-PDF with spoofed application/pdf MIME type...');
     const fakeFormData = new FormData();
     const fakeContent = '<html><body><h1>Not a real PDF!</h1></body></html>';
@@ -46,16 +61,13 @@ const runTests = async () => {
       throw new Error(`Expected status 400 for spoofed PDF, but received ${res1.status}`);
     }
 
-    // Verify file was purged from disk
     const leftoverFiles = fs.readdirSync('uploads').filter(f => f.endsWith('renamed_executable.pdf'));
     if (leftoverFiles.length > 0) {
       throw new Error('Security Failure: Invalid file was not deleted from disk!');
     }
     console.log('   ✓ Verified: Spoofed file was completely purged from uploads/ disk directory.');
 
-    // -------------------------------------------------------------
     // Test 2: Valid PDF with %PDF- header -> 201
-    // -------------------------------------------------------------
     console.log('\n2. Testing genuine PDF with %PDF- magic bytes...');
     const validFormData = new FormData();
     const validPdfContent = '%PDF-1.4\n%âãÏÓ\n1 0 obj\n<< /Title (Test Valid PDF) >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF';

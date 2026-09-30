@@ -10,15 +10,17 @@ const PdfUploadComponent = () => {
   const [isUploading, setIsUploading] = useState(false);
   
   const fileInputRef = useRef(null);
+  const readTokenRef = useRef(0);
 
   const MAX_FILE_SIZE = 15 * 1024 * 1024; 
 
   const handleFileChange = (event) => {
+    const token = ++readTokenRef.current;
     setErrorMessage('');
     setSuccessMessage('');
     setSelectedFile(null);
 
-        const file = event.target.files[0];
+    const file = event.target.files[0];
 
     if (!file) return;
 
@@ -34,10 +36,11 @@ const PdfUploadComponent = () => {
       return;
     }
 
-    // Inspect first 5 bytes for magic header %PDF-
+    // Inspect first 5 bytes for magic header %PDF- with token cancellation
     const headerSlice = file.slice(0, 5);
     const reader = new FileReader();
     reader.onloadend = (e) => {
+      if (token !== readTokenRef.current) return;
       const arr = new Uint8Array(e.target.result);
       const headerStr = String.fromCharCode(...arr);
       if (!headerStr.startsWith('%PDF-')) {
@@ -58,10 +61,8 @@ const PdfUploadComponent = () => {
       setErrorMessage('');
       setSuccessMessage('');
 
-      // Send file to backend
       const response = await uploadPdfDocument(selectedFile);
       
-      // Add server-confirmed document info to the uploaded list
       setUploadedFiles((prevFiles) => [
         ...prevFiles, 
         {

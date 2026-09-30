@@ -7,3 +7,4 @@ pydantic
 pytest
 pytesseract
 httpx
+numpy

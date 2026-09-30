@@ -15,7 +15,6 @@ const storage = multer.diskStorage({
     cb(null, uploadDir);
   },
   filename: (req, file, cb) => {
-    // Generate a unique prefix: timestamp + random bytes
     const uniqueSuffix = `${Date.now()}-${crypto.randomBytes(6).toString('hex')}`;
     const cleanFileName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
     cb(null, `${uniqueSuffix}-${cleanFileName}`);
@@ -41,23 +40,51 @@ export const uploadPdf = multer({
 });
 
 /**
+ * Safely removes rejected files from disk, logging non-ENOENT errors.
+ */
+const safeDeleteFile = async (targetPath) => {
+  try {
+    const resolvedUploadDir = path.resolve(uploadDir);
+    const resolvedTarget = path.resolve(targetPath);
+    if (resolvedTarget.startsWith(resolvedUploadDir + path.sep)) {
+      await fs.promises.unlink(resolvedTarget);
+    }
+  } catch (err) {
+    if (err.code !== 'ENOENT') {
+      console.error(`Failed to delete rejected upload at ${targetPath}:`, err);
+    }
+  }
+};
+
+/**
  * Validates uploaded file magic numbers to ensure genuine PDF format (%PDF-).
- * If the file is not a genuine PDF, it is immediately unlinked from disk and a 400 is returned.
+ * Confines file paths to the upload directory and guarantees file descriptor closure.
  */
 export const validatePdfContent = async (req, res, next) => {
   if (!req.file) return next();
 
-  const filePath = req.file.path;
+  // CodeQL Fix: Ensure path is strictly contained within uploadDir
+  const resolvedUploadDir = path.resolve(uploadDir);
+  const filePath = path.resolve(req.file.path);
+  const isWithinUploadDir =
+    filePath === resolvedUploadDir || filePath.startsWith(resolvedUploadDir + path.sep);
+
+  if (!isWithinUploadDir) {
+    return res.status(400).json({
+      success: false,
+      message: 'Security validation failed: Invalid upload path.'
+    });
+  }
+
+  let fd;
   try {
-    const fd = await fs.promises.open(filePath, 'r');
+    fd = await fs.promises.open(filePath, 'r');
     const buffer = Buffer.alloc(1024);
     const { bytesRead } = await fd.read(buffer, 0, 1024, 0);
-    await fd.close();
 
     const header = buffer.subarray(0, bytesRead).toString('latin1');
     if (!header.includes('%PDF-')) {
-      // Remove invalid/malicious non-PDF file from disk
-      await fs.promises.unlink(filePath).catch(() => {});
+      await safeDeleteFile(filePath);
       return res.status(400).json({
         success: false,
         message: 'Security validation failed: File content does not match a valid PDF signature.'
@@ -66,12 +93,15 @@ export const validatePdfContent = async (req, res, next) => {
 
     next();
   } catch (error) {
-    if (fs.existsSync(filePath)) {
-      await fs.promises.unlink(filePath).catch(() => {});
-    }
+    await safeDeleteFile(filePath);
     return res.status(400).json({
       success: false,
       message: 'Failed to inspect uploaded file.'
     });
+  } finally {
+    // CodeRabbit Fix: Always close file descriptor even if read fails
+    if (fd) {
+      await fd.close().catch(() => {});
+    }
   }
 };
