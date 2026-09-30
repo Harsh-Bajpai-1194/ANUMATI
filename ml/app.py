@@ -1,12 +1,14 @@
 import io
 import json
 import logging
+import os
+import secrets
 from typing import Dict, Any, Optional, List
 from pathlib import Path
 import tempfile
 import asyncio
 
-from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from src.config import UPLOAD_FOLDER
@@ -17,6 +19,13 @@ from src.signature.signature_detector import SignatureDetector
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("anumati-ml")
+
+# Internal Shared Secret Authentication (Issue #83)
+ENVIRONMENT = os.getenv("ENV", os.getenv("ENVIRONMENT", "development")).lower()
+ML_INTERNAL_TOKEN = os.getenv("ML_INTERNAL_TOKEN", "dev-secret-internal-token-change-in-production")
+
+if ENVIRONMENT == "production" and (not os.getenv("ML_INTERNAL_TOKEN") or ML_INTERNAL_TOKEN == "dev-secret-internal-token-change-in-production"):
+    raise RuntimeError("FATAL: ML_INTERNAL_TOKEN must be explicitly configured in production environment!")
 
 app = FastAPI(
     title="ANUMATI ML & Document Evaluation Microservice",
@@ -58,119 +67,7 @@ def health_check():
     return {
         "status": "ok",
         "service": "ANUMATI ML Microservice",
-        "version": "1.2.0",
-        "pipeline_ready": True
-    }
-
-
-def execute_evaluation(
-    doc_bytes: bytes,
-    filename: str,
-    target_academic_year: Optional[str] = None
-) -> Dict[str, Any]:
-    if len(doc_bytes) > MAX_FILE_SIZE_BYTES:
-        raise HTTPException(
-            status_code=413,
-            detail=f"File exceeds maximum allowed size of {MAX_FILE_SIZE_BYTES / (1024 * 1024):.1f}MB"
-        )
-
-    try:
-        try:
-            import pymupdf as fitz
-        except ImportError:
-            import fitz
-            
-        doc = fitz.open(stream=doc_bytes, filetype="pdf")
-        total_pages = len(doc)
-        doc.close()
-        
-        if total_pages > MAX_PAGES:
-            raise HTTPException(
-                status_code=413,
-                detail=f"Document exceeds maximum allowed pages ({MAX_PAGES}). Found {total_pages} pages."
-            )
-    except HTTPException:
-        raise
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid or corrupted PDF document.")
-
-    pipeline = (
-        VerificationPipeline(target_academic_year=target_academic_year)
-        if target_academic_year
-        else verification_pipeline
-    )
-
-    try:
-        report = pipeline.verify_document(
-            doc_bytes,
-            document_name=filename,
-            save_report=True,
-            save_images=False  
-        )
-    except Exception as exc:
-        logger.error(f"Verification pipeline failed: {exc}", exc_info=True)
-        raise HTTPException(status_code=400, detail="Failed to process PDF.") from exc
-
-    full_text = (
-        report.get("text_extraction", {}).get("full_text")
-        or report.get("extracted_entities", {}).get("clean_text")
-        or ""
-    )
-
-    classification_result = document_classifier.classify_text(full_text)
-    signature_result = signature_detector.detect_signatures_in_pdf(doc_bytes)
-
-    flags: List[Dict[str, str]] = []
-    comp_eval = report["compliance_evaluation"]
-
-    for rule in comp_eval.get("rules", []):
-        if rule["status"] in ["FAILED", "WARNING"]:
-            flags.append({
-                "ruleCode": rule["rule_id"],
-                "description": rule["details"],
-                "severity": rule["severity"]
-            })
-
-    if not signature_result.get("signature_detected"):
-        flags.append({
-            "ruleCode": "MISSING_SIGNATURE",
-            "description": "No institutional authorization signatures detected on scanned pages.",
-            "severity": "medium"
-        })
-
-    if not signature_result.get("stamp_detected"):
-        flags.append({
-            "ruleCode": "MISSING_OFFICIAL_SEAL",
-            "description": "No colored official seal or institutional rubber stamp detected.",
-            "severity": "low"
-        })
-
-    is_flagged = any(f["severity"] in ["high", "critical"] for f in flags) or comp_eval["overall_status"] == "NON_COMPLIANT"
-
-    return {
-        "success": True,
-        "document": report["document"],
-        "classification": classification_result,
-        "textExtraction": {
-            "ocrConfidenceScore": report["text_extraction"].get("ocr_confidence"),
-            "method": report["text_extraction"]["method"],
-            "totalWords": report["text_extraction"]["total_words"],
-            "extractedEntities": report["extracted_entities"]
-        },
-        "signatureVerification": {
-            "detected": signature_result["signature_detected"],
-            "stampDetected": signature_result["stamp_detected"],
-            "confidenceScore": signature_result["confidence"],
-            "status": signature_result["status"],
-            "pageDetections": signature_result["page_detections"]
-        },
-        "complianceEvaluation": comp_eval,
-        "complianceScore": round(comp_eval["compliance_score"], 2),
-        "anomalyDetection": {
-            "flagged": is_flagged,
-            "flags": flags
-        },
-        "rawModelResponse": report
+        "version": "1.2.0"
     }
 
 
@@ -178,16 +75,23 @@ def _read_file_sync(target_path: Path) -> bytes:
     with open(target_path, "rb") as f:
         return f.read()
 
+
 @app.post("/evaluate")
 async def evaluate_document(
     request: Request,
     file: Optional[UploadFile] = File(None),
     filename: Optional[str] = Form(None),
     filePath: Optional[str] = Form(None),
-    targetAcademicYear: Optional[str] = Form(None)
+    targetAcademicYear: Optional[str] = Form(None),
+    x_internal_token: Optional[str] = Header(None, alias="X-Internal-Token")
 ):
-    import asyncio
-    
+    # Constant-time comparison to prevent timing attacks (Issue #83)
+    if not x_internal_token or not secrets.compare_digest(x_internal_token, ML_INTERNAL_TOKEN):
+        raise HTTPException(
+            status_code=401,
+            detail="Unauthorized: Missing or invalid X-Internal-Token header."
+        )
+
     ALLOWED_ROOTS = [
         UPLOAD_FOLDER.resolve(),
         (UPLOAD_FOLDER.parent.parent / "backend" / "uploads").resolve(),
@@ -247,13 +151,80 @@ async def evaluate_document(
         raise
     except Exception as exc:
         logger.error(f"Internal evaluation error: {exc}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Processing failed: {str(exc)}")
+
+
+def execute_evaluation(doc_bytes: bytes, filename: str, target_academic_year: Optional[str] = None) -> Dict[str, Any]:
+    if len(doc_bytes) > MAX_FILE_SIZE_BYTES:
         raise HTTPException(
-            status_code=500,
-            detail="An internal error occurred while evaluating the document."
+            status_code=413,
+            detail=f"File exceeds maximum allowed size of {MAX_FILE_SIZE_BYTES // (1024 * 1024)}MB"
         )
 
+    # 1. Run Verification Pipeline
+    report = verification_pipeline.process_pdf(
+        doc_bytes,
+        filename=filename,
+        target_academic_year=target_academic_year,
+        max_pages=MAX_PAGES
+    )
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("app:app", host="127.0.0.1", port=8000, reload=True)
-    
+    # 2. Run Document Classifier
+    classification_result = document_classifier.classify_document(
+        report["text_extraction"]["extracted_text"],
+        metadata={"filename": filename}
+    )
+
+    # 3. Run Signature and Stamp Detector
+    signature_result = signature_detector.detect_signatures_in_pdf(doc_bytes)
+
+    flags = list(report.get("anomalies_detected", []))
+
+    # Missing signature flag
+    if not signature_result.get("signature_detected"):
+        flags.append({
+            "ruleCode": "MISSING_SIGNATURE",
+            "description": "No institutional authorization signatures detected on scanned pages.",
+            "severity": "medium"
+        })
+
+    # Missing official seal flag
+    if not signature_result.get("stamp_detected"):
+        flags.append({
+            "ruleCode": "MISSING_OFFICIAL_SEAL",
+            "description": "No colored official seal or institutional rubber stamp detected.",
+            "severity": "low"
+        })
+
+    comp_eval = report["compliance_evaluation"]
+    is_flagged = any(f["severity"] in ["high", "critical"] for f in flags) or comp_eval["overall_status"] == "NON_COMPLIANT"
+
+    return {
+        "success": True,
+        "document": report["document"],
+        "classification": classification_result,
+        "textExtraction": {
+            "ocrConfidenceScore": report["text_extraction"].get("ocr_confidence"),
+            "method": report["text_extraction"]["method"],
+            "totalWords": report["text_extraction"]["total_words"],
+            "extractedEntities": report["extracted_entities"]
+        },
+        "signatureVerification": {
+            "detected": signature_result["signature_detected"],
+            "stampDetected": signature_result["stamp_detected"],
+            "confidenceScore": signature_result["confidence"],
+            "status": signature_result["status"],
+            "pageDetections": signature_result["page_detections"]
+        },
+        "complianceEvaluation": comp_eval,
+        "anomalyDetection": {
+            "flagged": is_flagged,
+            "flags": flags
+        },
+        "complianceSummary": {
+            "totalRulesEvaluated": comp_eval["total_rules_checked"],
+            "compliantCount": comp_eval["compliant_rules"],
+            "nonCompliantCount": comp_eval["non_compliant_rules"],
+            "complianceScore": comp_eval["compliance_score"]
+        }
+    }

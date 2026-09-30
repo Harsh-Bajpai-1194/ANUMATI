@@ -1,5 +1,6 @@
 import path from 'path';
 import AiEvaluation from '../models/AiEvaluation.js';
+import { ML_INTERNAL_TOKEN } from '../config/auth.js';
 
 const ML_SERVICE_URL = process.env.ML_SERVICE_URL || 'http://127.0.0.1:8000';
 const ML_REQUEST_TIMEOUT_MS = parseInt(process.env.ML_REQUEST_TIMEOUT_MS, 10) || 60000;
@@ -87,10 +88,11 @@ export const dispatchAiEvaluation = async (applicationId, filePath) => {
   const timeoutId = setTimeout(() => controller.abort(), ML_REQUEST_TIMEOUT_MS);
 
   try {
-    const response = await fetch(`${ML_SERVICE_URL}/evaluate`, {
+      const response = await fetch(`${ML_SERVICE_URL}/evaluate`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'X-Internal-Token': ML_INTERNAL_TOKEN
       },
       body: JSON.stringify({
         filePath: absolutePath,

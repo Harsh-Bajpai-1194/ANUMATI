@@ -10,6 +10,7 @@ except ImportError:
 from app import app
 
 client = TestClient(app)
+INTERNAL_AUTH_HEADERS = {"X-Internal-Token": "dev-secret-internal-token-change-in-production"}
 
 
 @pytest.fixture
@@ -32,7 +33,6 @@ def sample_pdf_bytes():
         "4. SC/ST Committee constituted.\n"
         "Authorized Signatory: Principal / Director"
     )
-    # Add vector lines for signature
     for i in range(20):
         p1.draw_line(fitz.Point(100 + i, 500), fitz.Point(105 + i, 510))
 
@@ -43,6 +43,7 @@ def sample_pdf_bytes():
 
 
 def test_health_endpoint():
+    # Health endpoint is public for Docker/Kubernetes health checks
     response = client.get("/health")
     assert response.status_code == 200
     data = response.json()
@@ -50,9 +51,29 @@ def test_health_endpoint():
     assert "version" in data
 
 
+def test_evaluate_missing_token_returns_401(sample_pdf_bytes):
+    response = client.post(
+        "/evaluate",
+        files={"file": ("institution_approval.pdf", sample_pdf_bytes, "application/pdf")}
+    )
+    assert response.status_code == 401
+    assert "Unauthorized" in response.json()["detail"]
+
+
+def test_evaluate_wrong_token_returns_401(sample_pdf_bytes):
+    response = client.post(
+        "/evaluate",
+        headers={"X-Internal-Token": "invalid-token"},
+        files={"file": ("institution_approval.pdf", sample_pdf_bytes, "application/pdf")}
+    )
+    assert response.status_code == 401
+    assert "Unauthorized" in response.json()["detail"]
+
+
 def test_evaluate_multipart_upload(sample_pdf_bytes):
     response = client.post(
         "/evaluate",
+        headers=INTERNAL_AUTH_HEADERS,
         files={"file": ("institution_approval.pdf", sample_pdf_bytes, "application/pdf")}
     )
     assert response.status_code == 200
@@ -66,15 +87,16 @@ def test_evaluate_multipart_upload(sample_pdf_bytes):
     assert "anomalyDetection" in data
     assert "signatureVerification" in data
 
+
 def test_evaluate_json_filepath(sample_pdf_bytes, tmp_path, monkeypatch):
     pdf_file = tmp_path / "saved_doc.pdf"
     pdf_file.write_bytes(sample_pdf_bytes)
 
-    # Monkeypatch the UPLOAD_FOLDER so the API allows reading from the test tmp_path
     monkeypatch.setattr("app.UPLOAD_FOLDER", tmp_path)
 
     response = client.post(
         "/evaluate",
+        headers=INTERNAL_AUTH_HEADERS,
         json={"filePath": str(pdf_file), "documentId": "APP-1024"}
     )
     assert response.status_code == 200
@@ -82,7 +104,11 @@ def test_evaluate_json_filepath(sample_pdf_bytes, tmp_path, monkeypatch):
     assert data["success"] is True
     assert data["complianceEvaluation"]["overall_status"] == "COMPLIANT"
 
+
 def test_evaluate_missing_payload():
-    response = client.post("/evaluate")
+    response = client.post(
+        "/evaluate",
+        headers=INTERNAL_AUTH_HEADERS
+    )
     assert response.status_code == 400
     
