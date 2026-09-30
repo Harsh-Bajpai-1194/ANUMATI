@@ -10,10 +10,12 @@ const PdfUploadComponent = () => {
   const [isUploading, setIsUploading] = useState(false);
   
   const fileInputRef = useRef(null);
+  const readTokenRef = useRef(0);
 
   const MAX_FILE_SIZE = 15 * 1024 * 1024; 
 
   const handleFileChange = (event) => {
+    const token = ++readTokenRef.current;
     setErrorMessage('');
     setSuccessMessage('');
     setSelectedFile(null);
@@ -33,7 +35,22 @@ const PdfUploadComponent = () => {
       resetInput();
       return;
     }
-    setSelectedFile(file);
+
+    // Inspect the first 1,024 bytes for the %PDF- magic header with token cancellation
+    const headerSlice = file.slice(0, 1024);
+    const reader = new FileReader();
+    reader.onloadend = (e) => {
+      if (token !== readTokenRef.current) return;
+      const arr = new Uint8Array(e.target.result);
+      const headerStr = String.fromCharCode(...arr);
+      if (!headerStr.includes('%PDF-')) {
+        setErrorMessage('Security Warning: File content does not match a valid PDF signature.');
+        resetInput();
+        return;
+      }
+      setSelectedFile(file);
+    };
+    reader.readAsArrayBuffer(headerSlice);
   };
 
   const handleUpload = async () => {
@@ -44,10 +61,8 @@ const PdfUploadComponent = () => {
       setErrorMessage('');
       setSuccessMessage('');
 
-      // Send file to backend
       const response = await uploadPdfDocument(selectedFile);
       
-      // Add server-confirmed document info to the uploaded list
       setUploadedFiles((prevFiles) => [
         ...prevFiles, 
         {

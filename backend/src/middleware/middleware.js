@@ -15,14 +15,13 @@ const storage = multer.diskStorage({
     cb(null, uploadDir);
   },
   filename: (req, file, cb) => {
-    // Generate a unique prefix: timestamp + random bytes
     const uniqueSuffix = `${Date.now()}-${crypto.randomBytes(6).toString('hex')}`;
     const cleanFileName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
     cb(null, `${uniqueSuffix}-${cleanFileName}`);
   }
 });
 
-// File filter: strictly allow application/pdf
+// File filter: check client-supplied MIME type
 const fileFilter = (req, file, cb) => {
   if (file.mimetype === 'application/pdf') {
     cb(null, true);
@@ -39,3 +38,71 @@ export const uploadPdf = multer({
     fileSize: 15 * 1024 * 1024 // 15 Megabytes
   }
 });
+
+/**
+ * Safely removes rejected files from disk, logging non-ENOENT errors.
+ * Avoids template literal in console.error to prevent CodeQL format string warnings.
+ */
+const safeDeleteFile = async (fileNameOrPath) => {
+  try {
+    const resolvedUploadDir = path.resolve(uploadDir);
+    const safeName = path.basename(fileNameOrPath);
+    const safeTarget = path.resolve(resolvedUploadDir, safeName);
+    if (safeTarget.startsWith(resolvedUploadDir + path.sep)) {
+      await fs.promises.unlink(safeTarget);
+    }
+  } catch (err) {
+    if (err.code !== 'ENOENT') {
+      console.error('Failed to delete rejected upload:', err);
+    }
+  }
+};
+
+/**
+ * Validates uploaded file magic numbers to ensure genuine PDF format (%PDF-).
+ * Confines file paths to the upload directory using path.basename() sanitization.
+ */
+export const validatePdfContent = async (req, res, next) => {
+  if (!req.file) return next();
+
+  // CodeQL Fix: Strip directory traversal using path.basename and verify containment
+  const resolvedUploadDir = path.resolve(uploadDir);
+  const safeFileName = path.basename(req.file.filename || req.file.path);
+  const filePath = path.resolve(resolvedUploadDir, safeFileName);
+  const isWithinUploadDir = filePath.startsWith(resolvedUploadDir + path.sep);
+
+  if (!isWithinUploadDir) {
+    return res.status(400).json({
+      success: false,
+      message: 'Security validation failed: Invalid upload path.'
+    });
+  }
+
+  let fd;
+  try {
+    fd = await fs.promises.open(filePath, 'r');
+    const buffer = Buffer.alloc(1024);
+    const { bytesRead } = await fd.read(buffer, 0, 1024, 0);
+
+    const header = buffer.subarray(0, bytesRead).toString('latin1');
+    if (!header.includes('%PDF-')) {
+      await safeDeleteFile(safeFileName);
+      return res.status(400).json({
+        success: false,
+        message: 'Security validation failed: File content does not match a valid PDF signature.'
+      });
+    }
+
+    next();
+  } catch (error) {
+    await safeDeleteFile(safeFileName);
+    return res.status(400).json({
+      success: false,
+      message: 'Failed to inspect uploaded file.'
+    });
+  } finally {
+    if (fd) {
+      await fd.close().catch(() => {});
+    }
+  }
+};
