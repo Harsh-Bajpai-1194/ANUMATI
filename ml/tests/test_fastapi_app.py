@@ -76,14 +76,14 @@ def test_evaluate_wrong_token_returns_401(sample_pdf_bytes):
 
 
 def test_evaluate_non_ascii_token_returns_401(sample_pdf_bytes):
+    # Pass raw bytes to simulate wire-level non-ASCII header without client-side httpx string encoding error
     response = client.post(
         "/evaluate",
-        headers={"X-Internal-Token": "invalid-token-\xe9"},
+        headers=[(b"x-internal-token", b"invalid-token-\xe9")],
         files={"file": ("institution_approval.pdf", sample_pdf_bytes, "application/pdf")}
     )
     assert response.status_code == 401
     assert "Unauthorized" in response.json()["detail"]
-
 
 def test_evaluate_multipart_upload(sample_pdf_bytes):
     response = client.post(

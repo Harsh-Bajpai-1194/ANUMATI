@@ -16,8 +16,22 @@ export const uploadDocument = async (req, res) => {
 
     const { filename, originalname, size, path: filePath } = req.file;
 
+    // Validate that the uploaded file path resolves under the expected uploads directory (CodeQL Fix)
+    const uploadRoot = path.resolve('uploads');
+    const safeFileName = path.basename(filename || filePath);
+    const resolvedFilePath = path.resolve(uploadRoot, safeFileName);
+    if (
+      !resolvedFilePath.startsWith(uploadRoot + path.sep) ||
+      !fs.existsSync(resolvedFilePath)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid uploaded file path.'
+      });
+    }
+
     // Compute sha256 checksum of physical file (Issue #35)
-    const fileBuffer = fs.readFileSync(filePath);
+    const fileBuffer = fs.readFileSync(resolvedFilePath);
     const sha256 = crypto.createHash('sha256').update(fileBuffer).digest('hex');
 
     // Validate UUID format if an applicationId is provided
@@ -39,7 +53,7 @@ export const uploadDocument = async (req, res) => {
       data: {
         applicationId: validApplicationId,
         originalName: originalname,
-        storageKey: filename,
+        storageKey: safeFileName,
         sha256: sha256,
         sizeBytes: size,
         status: 'uploaded',
@@ -157,12 +171,12 @@ export const deleteDocument = async (req, res) => {
       where: { documentId: id }
     });
 
-    // Safely remove physical file from uploads directory
+    // Safely remove physical file from uploads directory (CodeQL Path Sanitization)
     if (doc.storageKey) {
-      const uploadDir = path.resolve('uploads');
+      const uploadRoot = path.resolve('uploads');
       const safeFileName = path.basename(doc.storageKey);
-      const targetPath = path.resolve(uploadDir, safeFileName);
-      if (targetPath.startsWith(uploadDir + path.sep) && fs.existsSync(targetPath)) {
+      const targetPath = path.resolve(uploadRoot, safeFileName);
+      if (targetPath.startsWith(uploadRoot + path.sep) && fs.existsSync(targetPath)) {
         try {
           fs.unlinkSync(targetPath);
         } catch (unlinkErr) {
