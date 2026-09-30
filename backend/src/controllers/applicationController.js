@@ -1,31 +1,33 @@
 import prisma from '../config/db.js';
 
-// POST /api/applications (applicant)
 export const createApplication = async (req, res) => {
   try {
     const { institutionId, applicationType, academicYear } = req.body;
     
-    // Validate applicant is creating for their own institution, unless they are admin
     if (req.user.role === 'applicant' && req.user.institutionId !== institutionId) {
       return res.status(403).json({ success: false, message: 'Cannot create application for another institution' });
     }
 
-    const application = await prisma.application.create({
-      data: {
-        institutionId,
-        applicationType,
-        academicYear,
-        currentStatus: 'draft'
-      }
-    });
+    // CodeRabbit Fix: Use Prisma transaction to ensure atomicity
+    const application = await prisma.$transaction(async (tx) => {
+      const newApp = await tx.application.create({
+        data: {
+          institutionId,
+          applicationType,
+          academicYear,
+          currentStatus: 'draft'
+        }
+      });
 
-    // Create initial status log
-    await prisma.applicationStatusLog.create({
-      data: {
-        applicationId: application.applicationId,
-        newStatus: 'draft',
-        changedBy: req.user.userId
-      }
+      await tx.applicationStatusLog.create({
+        data: {
+          applicationId: newApp.applicationId,
+          newStatus: 'draft',
+          changedBy: req.user.userId
+        }
+      });
+
+      return newApp;
     });
 
     res.status(201).json({ success: true, application });
@@ -38,7 +40,6 @@ export const createApplication = async (req, res) => {
   }
 };
 
-// GET /api/applications (applicant: own institution; evaluator/admin: all, filter by status)
 export const listApplications = async (req, res) => {
   try {
     const { status } = req.query;
@@ -66,7 +67,6 @@ export const listApplications = async (req, res) => {
   }
 };
 
-// GET /api/applications/:id
 export const getApplicationById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -86,7 +86,6 @@ export const getApplicationById = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Application not found' });
     }
 
-    // Access control check
     if (req.user.role === 'applicant' && application.institutionId !== req.user.institutionId) {
       return res.status(403).json({ success: false, message: 'Access denied' });
     }
@@ -98,7 +97,6 @@ export const getApplicationById = async (req, res) => {
   }
 };
 
-// POST /api/applications/:id/submit
 export const submitApplication = async (req, res) => {
   try {
     const { id } = req.params;
@@ -116,21 +114,26 @@ export const submitApplication = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Application must be in draft or returned_for_correction state to submit' });
     }
 
-    const updatedApp = await prisma.application.update({
-      where: { applicationId: id },
-      data: {
-        currentStatus: 'submitted',
-        submittedBy: req.user.userId
-      }
-    });
+    // CodeRabbit Fix: Use Prisma transaction to ensure atomicity
+    const updatedApp = await prisma.$transaction(async (tx) => {
+      const app = await tx.application.update({
+        where: { applicationId: id },
+        data: {
+          currentStatus: 'submitted',
+          submittedBy: req.user.userId
+        }
+      });
 
-    await prisma.applicationStatusLog.create({
-      data: {
-        applicationId: id,
-        oldStatus: application.currentStatus,
-        newStatus: 'submitted',
-        changedBy: req.user.userId
-      }
+      await tx.applicationStatusLog.create({
+        data: {
+          applicationId: id,
+          oldStatus: application.currentStatus,
+          newStatus: 'submitted',
+          changedBy: req.user.userId
+        }
+      });
+
+      return app;
     });
 
     res.status(200).json({ success: true, application: updatedApp });
@@ -140,11 +143,10 @@ export const submitApplication = async (req, res) => {
   }
 };
 
-// POST /api/applications/:id/decision
 export const decisionApplication = async (req, res) => {
   try {
     const { id } = req.params;
-    const { decision } = req.body; // 'approved', 'rejected', 'returned_for_correction'
+    const { decision } = req.body; 
 
     if (!['approved', 'rejected', 'returned_for_correction'].includes(decision)) {
       return res.status(400).json({ success: false, message: 'Invalid decision status' });
@@ -155,20 +157,30 @@ export const decisionApplication = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Application not found' });
     }
 
-    const updatedApp = await prisma.application.update({
-      where: { applicationId: id },
-      data: {
-        currentStatus: decision
-      }
-    });
+    // CodeRabbit Fix: Enforce allowed status transition
+    if (application.currentStatus !== 'submitted') {
+      return res.status(400).json({ success: false, message: 'Only submitted applications can receive a decision' });
+    }
 
-    await prisma.applicationStatusLog.create({
-      data: {
-        applicationId: id,
-        oldStatus: application.currentStatus,
-        newStatus: decision,
-        changedBy: req.user.userId
-      }
+    // CodeRabbit Fix: Use Prisma transaction to ensure atomicity
+    const updatedApp = await prisma.$transaction(async (tx) => {
+      const app = await tx.application.update({
+        where: { applicationId: id },
+        data: {
+          currentStatus: decision
+        }
+      });
+
+      await tx.applicationStatusLog.create({
+        data: {
+          applicationId: id,
+          oldStatus: application.currentStatus,
+          newStatus: decision,
+          changedBy: req.user.userId
+        }
+      });
+
+      return app;
     });
 
     res.status(200).json({ success: true, application: updatedApp });

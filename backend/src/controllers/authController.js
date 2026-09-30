@@ -1,12 +1,11 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import prisma from '../config/db.js';
-
-const JWT_SECRET = process.env.JWT_SECRET || 'supersecretjwtkey';
+import { JWT_SECRET } from '../config/auth.js';
 
 export const register = async (req, res) => {
   try {
-    const { fullName, email, password, role, institutionId } = req.body;
+    const { fullName, email, password } = req.body;
 
     if (!fullName || !email || !password) {
       return res.status(400).json({ success: false, message: 'Missing required fields' });
@@ -19,13 +18,14 @@ export const register = async (req, res) => {
 
     const passwordHash = await bcrypt.hash(password, 10);
 
+    // CodeRabbit Fix: Force 'applicant' role and null institutionId on public registration
     const user = await prisma.user.create({
       data: {
         fullName,
         email,
         passwordHash,
-        role: role || 'applicant',
-        institutionId: institutionId || null
+        role: 'applicant',
+        institutionId: null
       }
     });
 

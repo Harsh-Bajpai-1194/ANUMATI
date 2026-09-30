@@ -1,7 +1,6 @@
 import jwt from 'jsonwebtoken';
 import prisma from '../config/db.js';
-
-const JWT_SECRET = process.env.JWT_SECRET || 'supersecretjwtkey';
+import { JWT_SECRET } from '../config/auth.js';
 
 export const requireAuth = async (req, res, next) => {
   try {

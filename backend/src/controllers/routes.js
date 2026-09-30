@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import { uploadPdf } from '../middleware/middleware.js';
 import { uploadDocument, documentHealthCheck } from './documentController.js';
 import {
@@ -20,6 +21,15 @@ import {
 } from './applicationController.js';
 
 const router = Router();
+
+// CodeQL Fix: Apply a generic rate limiter to satisfy missing rate limiting security checks
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+router.use(apiLimiter);
 
 // ==========================================
 // Auth & RBAC Routes (Issue #31)
@@ -57,7 +67,8 @@ router.get('/evaluations/:id', requireAuth, getEvaluationRecordById);
 // ==========================================
 // Application Lifecycle Routes (Issue #87)
 // ==========================================
-router.post('/applications', requireAuth, createApplication);
+// CodeRabbit Fix: Added requireRole check for applicant creation
+router.post('/applications', requireAuth, requireRole(['applicant', 'admin']), createApplication);
 router.get('/applications', requireAuth, listApplications);
 router.get('/applications/:id', requireAuth, getApplicationById);
 
