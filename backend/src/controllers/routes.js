@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
-import { uploadPdf } from '../middleware/middleware.js';
+import { uploadPdf, validatePdfContent } from '../middleware/middleware.js';
 import { uploadDocument, documentHealthCheck, getDocumentStatus } from './documentController.js';
 import {
   saveEvaluationReport,
@@ -41,7 +41,7 @@ router.post('/auth/login', login);
 // ==========================================
 router.get('/documents/health', documentHealthCheck);
 
-// Upload route with optionalAuth: works with or without JWT token
+// Upload route with optionalAuth, Multer, and content-based %PDF- validation
 router.post('/documents/upload', optionalAuth, (req, res, next) => {
   uploadPdf.single('file')(req, res, (err) => {
     if (err) {
@@ -52,7 +52,7 @@ router.post('/documents/upload', optionalAuth, (req, res, next) => {
     }
     next();
   });
-}, uploadDocument);
+}, validatePdfContent, uploadDocument);
 
 // Get document polling status (Issue #85)
 router.get('/documents/:id', optionalAuth, getDocumentStatus);

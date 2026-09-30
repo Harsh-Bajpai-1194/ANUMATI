@@ -22,7 +22,7 @@ const storage = multer.diskStorage({
   }
 });
 
-// File filter: strictly allow application/pdf
+// File filter: check client-supplied MIME type
 const fileFilter = (req, file, cb) => {
   if (file.mimetype === 'application/pdf') {
     cb(null, true);
@@ -39,3 +39,39 @@ export const uploadPdf = multer({
     fileSize: 15 * 1024 * 1024 // 15 Megabytes
   }
 });
+
+/**
+ * Validates uploaded file magic numbers to ensure genuine PDF format (%PDF-).
+ * If the file is not a genuine PDF, it is immediately unlinked from disk and a 400 is returned.
+ */
+export const validatePdfContent = async (req, res, next) => {
+  if (!req.file) return next();
+
+  const filePath = req.file.path;
+  try {
+    const fd = await fs.promises.open(filePath, 'r');
+    const buffer = Buffer.alloc(1024);
+    const { bytesRead } = await fd.read(buffer, 0, 1024, 0);
+    await fd.close();
+
+    const header = buffer.subarray(0, bytesRead).toString('latin1');
+    if (!header.includes('%PDF-')) {
+      // Remove invalid/malicious non-PDF file from disk
+      await fs.promises.unlink(filePath).catch(() => {});
+      return res.status(400).json({
+        success: false,
+        message: 'Security validation failed: File content does not match a valid PDF signature.'
+      });
+    }
+
+    next();
+  } catch (error) {
+    if (fs.existsSync(filePath)) {
+      await fs.promises.unlink(filePath).catch(() => {});
+    }
+    return res.status(400).json({
+      success: false,
+      message: 'Failed to inspect uploaded file.'
+    });
+  }
+};

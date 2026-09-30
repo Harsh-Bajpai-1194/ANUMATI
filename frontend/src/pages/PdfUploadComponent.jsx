@@ -18,7 +18,7 @@ const PdfUploadComponent = () => {
     setSuccessMessage('');
     setSelectedFile(null);
 
-    const file = event.target.files[0];
+        const file = event.target.files[0];
 
     if (!file) return;
 
@@ -33,7 +33,21 @@ const PdfUploadComponent = () => {
       resetInput();
       return;
     }
-    setSelectedFile(file);
+
+    // Inspect first 5 bytes for magic header %PDF-
+    const headerSlice = file.slice(0, 5);
+    const reader = new FileReader();
+    reader.onloadend = (e) => {
+      const arr = new Uint8Array(e.target.result);
+      const headerStr = String.fromCharCode(...arr);
+      if (!headerStr.startsWith('%PDF-')) {
+        setErrorMessage('Security Warning: File content does not match a valid PDF signature.');
+        resetInput();
+        return;
+      }
+      setSelectedFile(file);
+    };
+    reader.readAsArrayBuffer(headerSlice);
   };
 
   const handleUpload = async () => {
