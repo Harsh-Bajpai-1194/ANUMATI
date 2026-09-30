@@ -201,6 +201,67 @@ def _read_file_sync(target_path: Path) -> bytes:
     with open(target_path, "rb") as f:
         return f.read()
 
+def build_safe_target_path(path_str: str) -> Path:
+    """
+    Validate and resolve a user-supplied file path strictly inside
+    UPLOAD_FOLDER.
+    """
+
+    if not isinstance(path_str, str) or not path_str.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="'filePath' must be a non-empty string."
+        )
+
+    raw_path = path_str.strip()
+
+    # Reject null-byte injection.
+    if "\x00" in raw_path:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid file path."
+        )
+
+    # Reject parent-directory traversal before path resolution.
+    # Handles both Unix and Windows separators.
+    path_parts = raw_path.replace("\\", "/").split("/")
+
+    if ".." in path_parts:
+        raise HTTPException(
+            status_code=403,
+            detail="Security Error: Path traversal is not allowed."
+        )
+
+    # Resolve the trusted security boundary.
+    upload_root = os.path.abspath(
+        os.path.realpath(os.fspath(UPLOAD_FOLDER))
+    )
+
+    # Construct the candidate relative to the trusted root.
+    candidate_path = os.path.abspath(
+        os.path.join(upload_root, raw_path)
+    )
+
+    # Resolve symlinks before the boundary check.
+    candidate_path = os.path.abspath(
+        os.path.realpath(candidate_path)
+    )
+
+    # Normalize case on case-insensitive systems.
+    normalized_root = os.path.normcase(upload_root)
+    normalized_candidate = os.path.normcase(candidate_path)
+
+    # Require the candidate to be strictly inside UPLOAD_FOLDER.
+    if (
+        normalized_candidate == normalized_root
+        or not normalized_candidate.startswith(normalized_root + os.sep)
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Security Error: Path is outside the allowed upload directory."
+        )
+
+    return Path(candidate_path)
 
 @app.post("/evaluate")
 async def evaluate_document(
@@ -221,27 +282,6 @@ async def evaluate_document(
             status_code=401,
             detail="Unauthorized: Missing or invalid X-Internal-Token header."
         )
-
-    ALLOWED_ROOTS = [
-        UPLOAD_FOLDER.resolve(),
-        (UPLOAD_FOLDER.parent.parent / "backend" / "uploads").resolve(),
-        (UPLOAD_FOLDER.parent.parent / "uploads").resolve(),
-    ]
-    
-    def check_safe_path(target: Path):
-        normalized_target = target.resolve(strict=False)
-        if not any(normalized_target.is_relative_to(root) for root in ALLOWED_ROOTS):
-            raise HTTPException(
-                status_code=403, 
-                detail="Security Error: Path is outside allowed directories."
-            )
-
-    def build_safe_target_path(path_str: str) -> Path:
-        if not path_str:
-            raise HTTPException(status_code=400, detail="'filePath' must be a non-empty string.")
-        target = Path(path_str).resolve(strict=False)
-        check_safe_path(target)
-        return target
 
     try:
         content_type = request.headers.get("content-type", "")

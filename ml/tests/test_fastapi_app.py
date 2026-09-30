@@ -120,6 +120,87 @@ def test_evaluate_json_filepath(sample_pdf_bytes, tmp_path, monkeypatch):
     assert data["complianceEvaluation"]["overall_status"] == "COMPLIANT"
 
 
+def test_evaluate_rejects_parent_directory_traversal(tmp_path, monkeypatch):
+    monkeypatch.setattr("app.UPLOAD_FOLDER", tmp_path)
+
+    response = client.post(
+        "/evaluate",
+        headers=INTERNAL_AUTH_HEADERS,
+        json={
+            "filePath": "../secret.pdf",
+            "documentId": "APP-1024"
+        }
+    )
+
+    assert response.status_code == 403
+    assert "Path traversal" in response.json()["detail"]
+
+
+def test_evaluate_rejects_windows_parent_directory_traversal(tmp_path, monkeypatch):
+    monkeypatch.setattr("app.UPLOAD_FOLDER", tmp_path)
+
+    response = client.post(
+        "/evaluate",
+        headers=INTERNAL_AUTH_HEADERS,
+        json={
+            "filePath": r"..\secret.pdf",
+            "documentId": "APP-1024"
+        }
+    )
+
+    assert response.status_code == 403
+    assert "Path traversal" in response.json()["detail"]
+
+
+def test_evaluate_rejects_nested_parent_directory_traversal(tmp_path, monkeypatch):
+    monkeypatch.setattr("app.UPLOAD_FOLDER", tmp_path)
+
+    response = client.post(
+        "/evaluate",
+        headers=INTERNAL_AUTH_HEADERS,
+        json={
+            "filePath": "documents/../../secret.pdf",
+            "documentId": "APP-1024"
+        }
+    )
+
+    assert response.status_code == 403
+    assert "Path traversal" in response.json()["detail"]
+
+
+def test_evaluate_rejects_path_outside_upload_folder(tmp_path, monkeypatch):
+    monkeypatch.setattr("app.UPLOAD_FOLDER", tmp_path)
+
+    outside_file = tmp_path.parent / "outside.pdf"
+
+    response = client.post(
+        "/evaluate",
+        headers=INTERNAL_AUTH_HEADERS,
+        json={
+            "filePath": str(outside_file),
+            "documentId": "APP-1024"
+        }
+    )
+
+    assert response.status_code == 403
+    assert "outside the allowed upload directory" in response.json()["detail"]
+
+
+def test_evaluate_rejects_null_byte_in_path(tmp_path, monkeypatch):
+    monkeypatch.setattr("app.UPLOAD_FOLDER", tmp_path)
+
+    response = client.post(
+        "/evaluate",
+        headers=INTERNAL_AUTH_HEADERS,
+        json={
+            "filePath": "document.pdf\x00.txt",
+            "documentId": "APP-1024"
+        }
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Invalid file path."
+
 def test_evaluate_missing_payload():
     response = client.post(
         "/evaluate",
