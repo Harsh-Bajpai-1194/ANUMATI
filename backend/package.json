@@ -33,6 +33,9 @@
   "devDependencies": {
     "prisma": "^7.9.0"
   },
+  "overrides": {
+    "mysql2": "^3.22.0"
+  },
   "allowScripts": {
     "prisma@7.9.1": true,
     "@prisma/engines@7.9.1": true
