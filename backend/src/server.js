@@ -58,8 +58,8 @@ const startServer = async () => {
       });
     };
 
-    process.on('SIGINT', shutdown);  
-    process.on('SIGTERM', shutdown); 
+    process.on('SIGINT', shutdown);
+    process.on('SIGTERM', shutdown);
 
   } catch (error) {
     console.error('Failed to initialize server:', error);
