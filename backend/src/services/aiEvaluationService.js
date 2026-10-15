@@ -1,3 +1,4 @@
+import fs from 'fs';
 import path from 'path';
 import AiEvaluation from '../models/AiEvaluation.js';
 import { ML_INTERNAL_TOKEN } from '../config/auth.js';
@@ -82,22 +83,31 @@ export const parseAndStoreAiReport = async (applicationId, rawReport) => {
 export const dispatchAiEvaluation = async (applicationId, filePath) => {
   const absolutePath = path.resolve(filePath);
 
-  console.log(`[ML Dispatcher] Sending ${applicationId} to ML Service at ${ML_SERVICE_URL}/evaluate...`);
+  if (!fs.existsSync(absolutePath)) {
+    throw new Error(`File not found at path: ${absolutePath}`);
+  }
+
+  const mlServiceUrl = process.env.ML_SERVICE_URL || 'http://127.0.0.1:8000';
+  const requestTimeoutMs = parseInt(process.env.ML_REQUEST_TIMEOUT_MS, 10) || 60000;
+  const fileName = path.basename(absolutePath);
+
+  console.log(`[ML Dispatcher] Sending ${applicationId} (${fileName}) to ML Service at ${mlServiceUrl}/evaluate...`);
+
+  const fileBuffer = await fs.promises.readFile(absolutePath);
+  const formData = new FormData();
+  const fileBlob = new Blob([fileBuffer], { type: 'application/pdf' });
+  formData.append('file', fileBlob, fileName);
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), ML_REQUEST_TIMEOUT_MS);
+  const timeoutId = setTimeout(() => controller.abort(), requestTimeoutMs);
 
   try {
-      const response = await fetch(`${ML_SERVICE_URL}/evaluate`, {
+    const response = await fetch(`${mlServiceUrl}/evaluate`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
         'X-Internal-Token': ML_INTERNAL_TOKEN
       },
-      body: JSON.stringify({
-        filePath: absolutePath,
-        documentId: applicationId
-      }),
+      body: formData,
       signal: controller.signal
     });
 
