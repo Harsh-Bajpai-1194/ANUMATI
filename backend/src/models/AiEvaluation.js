@@ -3,8 +3,13 @@ import mongoose from 'mongoose';
 const aiEvaluationSchema = new mongoose.Schema({
   applicationId: {
     type: String,
-    required: true,
-    index: true
+    index: true,
+    sparse: true
+  },
+  documentId: {
+    type: String,
+    index: true,
+    sparse: true
   },
   complianceScore: {
     type: Number,
@@ -25,6 +30,12 @@ const aiEvaluationSchema = new mongoose.Schema({
   rawModelResponse: { type: mongoose.Schema.Types.Mixed }
 }, {
   timestamps: true
+});
+
+aiEvaluationSchema.pre('validate', function() {
+  if (!this.applicationId && !this.documentId) {
+    this.invalidate('applicationId', 'Either applicationId or documentId is required.');
+  }
 });
 
 const AiEvaluation = mongoose.model('AiEvaluation', aiEvaluationSchema);

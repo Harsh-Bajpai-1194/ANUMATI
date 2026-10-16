@@ -25,9 +25,19 @@ const normalizeFlags = (rawFlags = []) => {
   });
 };
 
-export const parseAndStoreAiReport = async (applicationId, rawReport) => {
-  if (!applicationId || typeof applicationId !== 'string') {
-    throw new Error('A valid applicationId string is required to store an AI evaluation report.');
+export const parseAndStoreAiReport = async (identifiers, rawReport) => {
+  let applicationId = null;
+  let documentId = null;
+
+  if (typeof identifiers === 'string') {
+    applicationId = identifiers.trim() || null;
+  } else if (identifiers && typeof identifiers === 'object') {
+    applicationId = typeof identifiers.applicationId === 'string' && identifiers.applicationId.trim() ? identifiers.applicationId.trim() : null;
+    documentId = typeof identifiers.documentId === 'string' && identifiers.documentId.trim() ? identifiers.documentId.trim() : null;
+  }
+
+  if (!applicationId && !documentId) {
+    throw new Error('A valid applicationId or documentId string is required to store an AI evaluation report.');
   }
 
   if (!rawReport || typeof rawReport !== 'object' || Array.isArray(rawReport)) {
@@ -61,8 +71,7 @@ export const parseAndStoreAiReport = async (applicationId, rawReport) => {
   
   const complianceScore = typeof rawReport.complianceScore === 'number' ? rawReport.complianceScore : 0;
 
-  const evaluationDocument = new AiEvaluation({
-    applicationId: applicationId.trim(),
+  const evaluationPayload = {
     complianceScore,
     extractedTextMetadata: {
       ocrConfidenceScore,
@@ -73,29 +82,49 @@ export const parseAndStoreAiReport = async (applicationId, rawReport) => {
       flags
     },
     rawModelResponse: rawReport
-  });
+  };
 
+  if (applicationId) {
+    evaluationPayload.applicationId = applicationId;
+  }
+  if (documentId) {
+    evaluationPayload.documentId = documentId;
+  }
+
+  const evaluationDocument = new AiEvaluation(evaluationPayload);
   const savedRecord = await evaluationDocument.save();
-  console.log(`[AI Evaluation Service] Report saved for application ${applicationId} (Mongo ID: ${savedRecord._id})`);
+  const targetLabel = applicationId ? `application ${applicationId}` : `document ${documentId}`;
+  console.log(`[AI Evaluation Service] Report saved for ${targetLabel} (Mongo ID: ${savedRecord._id})`);
   return savedRecord;
 };
 
-export const dispatchAiEvaluation = async (applicationId, filePath) => {
+export const dispatchAiEvaluation = async (identifiers, filePath) => {
   const absolutePath = path.resolve(filePath);
 
   if (!fs.existsSync(absolutePath)) {
     throw new Error(`File not found at path: ${absolutePath}`);
   }
 
+  let applicationId = null;
+  let documentId = null;
+
+  if (typeof identifiers === 'string') {
+    applicationId = identifiers.trim() || null;
+  } else if (identifiers && typeof identifiers === 'object') {
+    applicationId = typeof identifiers.applicationId === 'string' && identifiers.applicationId.trim() ? identifiers.applicationId.trim() : null;
+    documentId = typeof identifiers.documentId === 'string' && identifiers.documentId.trim() ? identifiers.documentId.trim() : null;
+  }
+
   const mlServiceUrl = process.env.ML_SERVICE_URL || 'http://127.0.0.1:8000';
   const requestTimeoutMs = parseInt(process.env.ML_REQUEST_TIMEOUT_MS, 10) || 60000;
   const fileName = path.basename(absolutePath);
+  const targetLabel = applicationId ? `application ${applicationId}` : `document ${documentId || 'unknown'}`;
 
-  console.log(`[ML Dispatcher] Sending ${applicationId} (${fileName}) to ML Service at ${mlServiceUrl}/evaluate...`);
+  console.log(`[ML Dispatcher] Sending ${targetLabel} (${fileName}) to ML Service at ${mlServiceUrl}/evaluate...`);
 
-  const fileBuffer = await fs.promises.readFile(absolutePath);
+  // Stream PDF directly as Blob to avoid buffering entire file into memory (CodeRabbit review)
+  const fileBlob = await fs.openAsBlob(absolutePath, { type: 'application/pdf' });
   const formData = new FormData();
-  const fileBlob = new Blob([fileBuffer], { type: 'application/pdf' });
   formData.append('file', fileBlob, fileName);
 
   const controller = new AbortController();
@@ -117,12 +146,12 @@ export const dispatchAiEvaluation = async (applicationId, filePath) => {
     }
 
     const evaluationResult = await response.json();
-    console.log(`[ML Dispatcher] ML evaluation received for ${applicationId}. Storing report...`);
+    console.log(`[ML Dispatcher] ML evaluation received for ${targetLabel}. Storing report...`);
 
-    return await parseAndStoreAiReport(applicationId, evaluationResult);
+    return await parseAndStoreAiReport({ applicationId, documentId }, evaluationResult);
   } catch (error) {
     if (error.name === 'AbortError') {
-      throw new Error(`ML evaluation request timed out after ${ML_REQUEST_TIMEOUT_MS}ms`);
+      throw new Error(`ML evaluation request timed out after ${requestTimeoutMs}ms`);
     }
     throw error;
   } finally {
@@ -133,6 +162,11 @@ export const dispatchAiEvaluation = async (applicationId, filePath) => {
 export const getAiEvaluationByApplicationId = async (applicationId) => {
   if (!applicationId) throw new Error('applicationId parameter is required.');
   return await AiEvaluation.find({ applicationId }).sort({ createdAt: -1 }).lean();
+};
+
+export const getAiEvaluationByDocumentId = async (documentId) => {
+  if (!documentId) throw new Error('documentId parameter is required.');
+  return await AiEvaluation.find({ documentId }).sort({ createdAt: -1 }).lean();
 };
 
 export const getAiEvaluationById = async (id) => {

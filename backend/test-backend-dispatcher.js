@@ -56,6 +56,7 @@ const runDispatcherTests = async () => {
   let lastReceivedBody = null;
   let simulateMode = 'success'; // 'success' | 'unauthorized' | 'server_error' | 'timeout'
   let savedRecordId = null;
+  let savedStandaloneRecordId = null;
 
   const testPdfPath = path.resolve(uploadDir, `test-dispatch-${Date.now()}.pdf`);
   const dummyPdfContent = '%PDF-1.4\n%Test AICTE Document for Multipart Dispatcher\n%%EOF';
@@ -129,6 +130,20 @@ const runDispatcherTests = async () => {
     }
     console.log(`   ✓ Result saved to MongoDB with _id: ${result._id}`);
 
+    // TEST 1b: Standalone document evaluation with documentId only (CodeRabbit feedback)
+    console.log('\n1b. Testing standalone document evaluation (documentId only, applicationId unset)...');
+    const testDocId = `DOC-STANDALONE-${Date.now()}`;
+    const standaloneResult = await dispatchAiEvaluation({ documentId: testDocId }, testPdfPath);
+    savedStandaloneRecordId = standaloneResult._id;
+
+    if (!standaloneResult || standaloneResult.documentId !== testDocId) {
+      throw new Error(`Expected saved record documentId "${testDocId}", got "${standaloneResult?.documentId}"`);
+    }
+    if (standaloneResult.applicationId) {
+      throw new Error(`Expected applicationId to be unset for standalone document, got "${standaloneResult.applicationId}"`);
+    }
+    console.log(`   ✓ Standalone document saved with documentId: ${standaloneResult.documentId} and applicationId: unset.`);
+
     // TEST 2: Local file not found throws error before network request
     console.log('\n2. Testing missing local file error handling...');
     let threwForMissing = false;
@@ -195,6 +210,14 @@ const runDispatcherTests = async () => {
         console.log(`✓ Cleanup: Removed temporary MongoDB record ${savedRecordId}.`);
       } catch (cleanErr) {
         console.warn('Warning: Failed to clean up MongoDB record:', cleanErr.message);
+      }
+    }
+    if (savedStandaloneRecordId) {
+      try {
+        await AiEvaluation.deleteOne({ _id: savedStandaloneRecordId });
+        console.log(`✓ Cleanup: Removed temporary MongoDB record ${savedStandaloneRecordId}.`);
+      } catch (cleanErr) {
+        console.warn('Warning: Failed to clean up MongoDB standalone record:', cleanErr.message);
       }
     }
     if (fs.existsSync(testPdfPath)) {

@@ -38,8 +38,13 @@ const processQueue = async () => {
     const resolvedPath = path.resolve(uploadDir, safeFileName);
 
     try {
-      const targetAppId = doc.applicationId || doc.documentId;
-      const evaluation = await dispatchAiEvaluation(targetAppId, resolvedPath);
+      const evaluation = await dispatchAiEvaluation(
+        {
+          applicationId: doc.applicationId || null,
+          documentId: doc.documentId
+        },
+        resolvedPath
+      );
       await prisma.document.update({
         where: { documentId: doc.documentId },
         data: {
