@@ -38,7 +38,13 @@ const processQueue = async () => {
     const resolvedPath = path.resolve(uploadDir, safeFileName);
 
     try {
-      const evaluation = await dispatchAiEvaluation(doc.applicationId || 'standalone-doc', resolvedPath);
+      const evaluation = await dispatchAiEvaluation(
+        {
+          applicationId: doc.applicationId || null,
+          documentId: doc.documentId
+        },
+        resolvedPath
+      );
       await prisma.document.update({
         where: { documentId: doc.documentId },
         data: {

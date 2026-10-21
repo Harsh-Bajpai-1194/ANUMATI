@@ -13,33 +13,38 @@ export const evaluationHealthCheck = (req, res) => {
   res.json({ status: 'ok', service: 'AI Evaluation Service' });
 };
 
-// POST /api/evaluations  { applicationId, report }
+// POST /api/evaluations  { applicationId, documentId, report }
 export const saveEvaluationReport = async (req, res) => {
   try {
-    const { applicationId, report } = req.body ?? {};
-    const saved = await parseAndStoreAiReport(applicationId, report);
+    const { applicationId, documentId, report } = req.body ?? {};
+    const saved = await parseAndStoreAiReport({ applicationId, documentId }, report);
     return res.status(201).json({ success: true, data: saved });
   } catch (error) {
-    // The service throws plain Errors for validation problems (and for DB errors);
-    // treat as 400 for now. Split into typed errors when auth/validation lands.
     return res.status(400).json({ success: false, message: error.message });
   }
 };
 
-// POST /api/evaluations/evaluate  { applicationId, storedName }
+// POST /api/evaluations/evaluate  { applicationId, documentId, storedName }
 // Only a bare filename is accepted; it is resolved inside uploads/ (no client-supplied paths).
 export const triggerEvaluation = async (req, res) => {
-  const { applicationId, storedName } = req.body ?? {};
-  if (typeof applicationId !== 'string' || typeof storedName !== 'string') {
+  const { applicationId, documentId, storedName } = req.body ?? {};
+  const trimmedAppId = typeof applicationId === 'string' ? applicationId.trim() : '';
+  const trimmedDocId = typeof documentId === 'string' ? documentId.trim() : '';
+  const trimmedStoredName = typeof storedName === 'string' ? storedName.trim() : '';
+
+  if ((!trimmedAppId && !trimmedDocId) || !trimmedStoredName) {
     return res.status(400).json({
       success: false,
-      message: 'applicationId and storedName are required strings.'
+      message: 'A non-empty applicationId or documentId and storedName are required strings.'
     });
   }
 
-  const filePath = path.join(uploadDir, path.basename(storedName));
+  const filePath = path.join(uploadDir, path.basename(trimmedStoredName));
   try {
-    const saved = await dispatchAiEvaluation(applicationId, filePath);
+    const saved = await dispatchAiEvaluation(
+      { applicationId: trimmedAppId || null, documentId: trimmedDocId || null },
+      filePath
+    );
     return res.status(201).json({ success: true, data: saved });
   } catch (error) {
     console.error('Evaluation dispatch failed:', error);
