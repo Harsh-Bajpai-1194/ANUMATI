@@ -3,7 +3,7 @@ import http from 'http';
 import fs from 'fs';
 import path from 'path';
 import connectMongoDB, { disconnectMongoDB } from './src/config/mongo.js';
-import { dispatchAiEvaluation } from './src/services/aiEvaluationService.js';
+import { dispatchAiEvaluation, getAiEvaluationByDocumentId } from './src/services/aiEvaluationService.js';
 import AiEvaluation from './src/models/AiEvaluation.js';
 import { ML_INTERNAL_TOKEN } from './src/config/auth.js';
 
@@ -74,11 +74,6 @@ const runDispatcherTests = async () => {
       req.on('end', () => {
         lastReceivedBody = Buffer.concat(chunks).toString('utf-8');
 
-        if (simulateMode === 'timeout') {
-          // Do not reply, let caller timeout
-          return;
-        }
-
         if (simulateMode === 'unauthorized') {
           res.writeHead(401, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ detail: 'Unauthorized: Missing or invalid X-Internal-Token header.' }));
@@ -91,7 +86,7 @@ const runDispatcherTests = async () => {
           return;
         }
 
-        // Default: 200 OK
+        // 200 OK
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(mockSuccessResponse));
       });
@@ -143,6 +138,46 @@ const runDispatcherTests = async () => {
       throw new Error(`Expected applicationId to be unset for standalone document, got "${standaloneResult.applicationId}"`);
     }
     console.log(`   ✓ Standalone document saved with documentId: ${standaloneResult.documentId} and applicationId: unset.`);
+
+    const byDocId = await getAiEvaluationByDocumentId(testDocId);
+    if (!byDocId || byDocId.length === 0 || byDocId[0].documentId !== testDocId) {
+      throw new Error('getAiEvaluationByDocumentId failed to retrieve standalone record.');
+    }
+    console.log(`   ✓ Successfully queried standalone record via getAiEvaluationByDocumentId.`);
+
+    // TEST 1c: Rejects empty or whitespace identifier before network or file operations
+    console.log('\n1c. Testing rejection of empty/whitespace identifier before ML call or file access...');
+    let threwForEmptyId = false;
+    try {
+      await dispatchAiEvaluation('   ', testPdfPath);
+    } catch (err) {
+      if (err.message.includes('valid applicationId or documentId')) {
+        threwForEmptyId = true;
+        console.log(`   ✓ Properly threw validation error before file access: "${err.message}"`);
+      } else {
+        throw err;
+      }
+    }
+    if (!threwForEmptyId) {
+      throw new Error('Should have thrown error for empty/whitespace identifier.');
+    }
+
+    // TEST 1d: Rejects empty object identifier before network or file operations
+    console.log('\n1d. Testing rejection of empty object identifier before ML call or file access...');
+    let threwForEmptyObj = false;
+    try {
+      await dispatchAiEvaluation({}, testPdfPath);
+    } catch (err) {
+      if (err.message.includes('valid applicationId or documentId')) {
+        threwForEmptyObj = true;
+        console.log(`   ✓ Properly threw validation error for empty object: "${err.message}"`);
+      } else {
+        throw err;
+      }
+    }
+    if (!threwForEmptyObj) {
+      throw new Error('Should have thrown error for empty identifier object.');
+    }
 
     // TEST 2: Local file not found throws error before network request
     console.log('\n2. Testing missing local file error handling...');
@@ -236,4 +271,3 @@ const runDispatcherTests = async () => {
 };
 
 runDispatcherTests();
-

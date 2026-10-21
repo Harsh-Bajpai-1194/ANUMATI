@@ -3,9 +3,6 @@ import path from 'path';
 import AiEvaluation from '../models/AiEvaluation.js';
 import { ML_INTERNAL_TOKEN } from '../config/auth.js';
 
-const ML_SERVICE_URL = process.env.ML_SERVICE_URL || 'http://127.0.0.1:8000';
-const ML_REQUEST_TIMEOUT_MS = parseInt(process.env.ML_REQUEST_TIMEOUT_MS, 10) || 60000;
-
 const VALID_SEVERITIES = new Set(['low', 'medium', 'high', 'critical']);
 
 const normalizeFlags = (rawFlags = []) => {
@@ -25,7 +22,7 @@ const normalizeFlags = (rawFlags = []) => {
   });
 };
 
-export const parseAndStoreAiReport = async (identifiers, rawReport) => {
+export const resolveIdentifiers = (identifiers) => {
   let applicationId = null;
   let documentId = null;
 
@@ -39,6 +36,12 @@ export const parseAndStoreAiReport = async (identifiers, rawReport) => {
   if (!applicationId && !documentId) {
     throw new Error('A valid applicationId or documentId string is required to store an AI evaluation report.');
   }
+
+  return { applicationId, documentId };
+};
+
+export const parseAndStoreAiReport = async (identifiers, rawReport) => {
+  const { applicationId, documentId } = resolveIdentifiers(identifiers);
 
   if (!rawReport || typeof rawReport !== 'object' || Array.isArray(rawReport)) {
     throw new Error('A valid JSON report object is required.');
@@ -99,20 +102,12 @@ export const parseAndStoreAiReport = async (identifiers, rawReport) => {
 };
 
 export const dispatchAiEvaluation = async (identifiers, filePath) => {
-  const absolutePath = path.resolve(filePath);
+  // Validate and resolve identifiers before reading the file or making network calls (CodeRabbit review)
+  const { applicationId, documentId } = resolveIdentifiers(identifiers);
 
+  const absolutePath = path.resolve(filePath);
   if (!fs.existsSync(absolutePath)) {
     throw new Error(`File not found at path: ${absolutePath}`);
-  }
-
-  let applicationId = null;
-  let documentId = null;
-
-  if (typeof identifiers === 'string') {
-    applicationId = identifiers.trim() || null;
-  } else if (identifiers && typeof identifiers === 'object') {
-    applicationId = typeof identifiers.applicationId === 'string' && identifiers.applicationId.trim() ? identifiers.applicationId.trim() : null;
-    documentId = typeof identifiers.documentId === 'string' && identifiers.documentId.trim() ? identifiers.documentId.trim() : null;
   }
 
   const mlServiceUrl = process.env.ML_SERVICE_URL || 'http://127.0.0.1:8000';
