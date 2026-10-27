@@ -4,7 +4,8 @@ yarn-debug.log*
 yarn-error.log*
 uploads/*
 !uploads/.gitkeep
-.env
+.env*
+!.env.example
 .git
 .gitignore
 test-*.js

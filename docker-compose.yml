@@ -87,7 +87,7 @@ services:
     restart: unless-stopped
     environment:
       - ENV=production
-      - ML_INTERNAL_TOKEN=${ML_INTERNAL_TOKEN:-dev-secret-internal-token-change-in-production}
+      - ML_INTERNAL_TOKEN=${ML_INTERNAL_TOKEN:-anumati_ml_production_internal_secret_2026}
     expose:
       - "8000"
     networks:
@@ -119,11 +119,12 @@ services:
     environment:
       - PORT=5000
       - NODE_ENV=production
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-anumati_user}:${POSTGRES_PASSWORD:-anumati_password}@postgres:5432/${POSTGRES_DB:-anumati_db}?schema=public
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
+      - DATABASE_URL=${DATABASE_URL:-postgresql://${POSTGRES_USER:-anumati_user}:${POSTGRES_PASSWORD:-anumati_password}@postgres:5432/${POSTGRES_DB:-anumati_db}?schema=public}
       - MONGODB_URI=mongodb://mongodb:27017/anumati_mongo
       - ML_SERVICE_URL=http://ml-service:8000
-      - ML_INTERNAL_TOKEN=${ML_INTERNAL_TOKEN:-dev-secret-internal-token-change-in-production}
-      - JWT_SECRET=${JWT_SECRET:-dev-jwt-secret-change-in-production}
+      - ML_INTERNAL_TOKEN=${ML_INTERNAL_TOKEN:-anumati_ml_production_internal_secret_2026}
+      - JWT_SECRET=${JWT_SECRET:-anumati_backend_jwt_production_secret_2026}
     volumes:
       - backend_uploads:/app/uploads
     networks:
@@ -149,6 +150,4 @@ services:
     ports:
       - "3000:80"
     networks:
-      - anumati-public
-
       - anumati-public

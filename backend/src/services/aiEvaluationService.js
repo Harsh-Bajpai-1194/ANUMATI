@@ -22,7 +22,7 @@ export const validateAiReportContract = (rawReport) => {
   const hasAnomaly = Boolean(rawReport.anomalyDetection);
 
   if (!hasExtraction && !hasAnomaly) {
-    throw new Error('Contract Violation: Report must include text extraction or anomaly detection.');
+    throw new Error('Contract Violation: Missing required text extraction or anomaly detection fields.');
   }
 
   if (rawReport.anomalyDetection) {
