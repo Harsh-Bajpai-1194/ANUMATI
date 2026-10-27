@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   # ==========================================
   # 1. ML Microservice Job (Python 3.11 + Pytest)
@@ -119,4 +122,33 @@ jobs:
 
       - name: Build frontend production bundle
         run: npm run build
-        
+
+  # ==========================================
+  # 4. Docker Build & Compose Validation Job
+  # ==========================================
+  docker:
+    name: Docker Build & Compose Validation
+    runs-on: ubuntu-latest
+    needs: [ml, backend, frontend]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: actions/setup-buildx-action@v3
+
+      - name: Validate docker-compose syntax & configs
+        run: docker compose config
+
+      - name: Build all Docker service images
+        run: docker compose build --parallel
+
+      - name: Spin up multi-container stack & check health
+        run: |
+          docker compose up -d --wait --wait-timeout 180
+          docker compose ps
+
+      - name: Teardown Docker stack
+        if: always()
+        run: docker compose down -v
