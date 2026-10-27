@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import AiEvaluation from '../models/AiEvaluation.js';
 import { ML_INTERNAL_TOKEN } from '../config/auth.js';
+import { getCached, setCached, deleteCached } from '../config/redis.js';
 
 const VALID_SEVERITIES = new Set(['low', 'medium', 'high', 'critical']);
 
@@ -122,6 +123,15 @@ export const parseAndStoreAiReport = async (identifiers, rawReport) => {
   const savedRecord = await evaluationDocument.save();
   const targetLabel = applicationId ? `application ${applicationId}` : `document ${documentId}`;
   console.log(`[AI Evaluation Service] Report saved for ${targetLabel} (Mongo ID: ${savedRecord._id})`);
+
+  // Invalidate Redis caches for this evaluation summary (Issue #118)
+  if (applicationId) {
+    await deleteCached(`cache:ai_eval:app:${applicationId}`);
+  }
+  if (documentId) {
+    await deleteCached(`cache:ai_eval:doc:${documentId}`);
+  }
+
   return savedRecord;
 };
 
@@ -148,7 +158,6 @@ export const dispatchAiEvaluation = async (identifiers, filePath) => {
   const timeoutId = setTimeout(() => controller.abort(), requestTimeoutMs);
 
   try {
-    // Send dual token headers to enforce internal microservice gatekeeping
     const response = await fetch(`${mlServiceUrl}/evaluate`, {
       method: 'POST',
       headers: {
@@ -178,14 +187,42 @@ export const dispatchAiEvaluation = async (identifiers, filePath) => {
   }
 };
 
+/**
+ * Get AI Evaluation by Application ID with Redis Caching (Issue #118)
+ */
 export const getAiEvaluationByApplicationId = async (applicationId) => {
   if (!applicationId) throw new Error('applicationId parameter is required.');
-  return await AiEvaluation.find({ applicationId }).sort({ createdAt: -1 }).lean();
+
+  const cacheKey = `cache:ai_eval:app:${applicationId}`;
+  const cached = await getCached(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const records = await AiEvaluation.find({ applicationId }).sort({ createdAt: -1 }).lean();
+  if (records && records.length > 0) {
+    await setCached(cacheKey, records, 120); // 120 seconds TTL
+  }
+  return records;
 };
 
+/**
+ * Get AI Evaluation by Document ID with Redis Caching (Issue #118)
+ */
 export const getAiEvaluationByDocumentId = async (documentId) => {
   if (!documentId) throw new Error('documentId parameter is required.');
-  return await AiEvaluation.find({ documentId }).sort({ createdAt: -1 }).lean();
+
+  const cacheKey = `cache:ai_eval:doc:${documentId}`;
+  const cached = await getCached(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const records = await AiEvaluation.find({ documentId }).sort({ createdAt: -1 }).lean();
+  if (records && records.length > 0) {
+    await setCached(cacheKey, records, 120);
+  }
+  return records;
 };
 
 export const getAiEvaluationById = async (id) => {

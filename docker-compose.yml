@@ -112,6 +112,8 @@ services:
         condition: service_healthy
       mongodb:
         condition: service_healthy
+      redis:
+        condition: service_healthy
       ml-service:
         condition: service_healthy
     ports:
@@ -122,6 +124,7 @@ services:
       - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
       - DATABASE_URL=${DATABASE_URL:-postgresql://${POSTGRES_USER:-anumati_user}:${POSTGRES_PASSWORD:-anumati_password}@postgres:5432/${POSTGRES_DB:-anumati_db}?schema=public}
       - MONGODB_URI=mongodb://mongodb:27017/anumati_mongo
+      - REDIS_URL=redis://redis:6379
       - ML_SERVICE_URL=http://ml-service:8000
       - ML_INTERNAL_TOKEN=${ML_INTERNAL_TOKEN:-anumati_ml_production_internal_secret_2026}
       - JWT_SECRET=${JWT_SECRET:-anumati_backend_jwt_production_secret_2026}
@@ -150,4 +153,6 @@ services:
     ports:
       - "3000:80"
     networks:
+      - anumati-public
+
       - anumati-public

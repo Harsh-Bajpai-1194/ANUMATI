@@ -6,6 +6,8 @@ import mongoose from 'mongoose';
 import apiRoutes from '../api/routes.js';
 import prisma from './config/db.js';
 import connectMongoDB, { disconnectMongoDB } from './config/mongo.js';
+import { connectRedis, disconnectRedis, isRedisConnected } from './config/redis.js';
+import { initRealtimeSubscriber } from './services/realtimeService.js';
 import { resumeStuckEvaluations } from './services/evaluationQueue.js';
 
 dotenv.config();
@@ -44,7 +46,7 @@ app.use(cors(corsOptions));
 app.use(express.json({ limit: '2mb' }));
 
 // ============================================================================
-// Load Balancer Health Checks (Issue #117)
+// Load Balancer Health Checks (Issue #117, #118)
 // ============================================================================
 
 // Liveness Probe: Verifies HTTP server is responding
@@ -56,7 +58,7 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Readiness Probe: Verifies database connectivity before directing cluster traffic
+// Readiness Probe: Verifies database and cache connectivity
 app.get('/ready', async (req, res) => {
   let isMongoReady = false;
   let isPostgresReady = false;
@@ -82,7 +84,8 @@ app.get('/ready', async (req, res) => {
     ready: isReady,
     databases: {
       mongodb: isMongoReady ? 'connected' : 'disconnected',
-      postgres: isPostgresReady ? 'connected' : 'disconnected'
+      postgres: isPostgresReady ? 'connected' : 'disconnected',
+      redis: isRedisConnected ? 'connected' : 'in-memory-fallback'
     },
     uptime: Math.floor(process.uptime()),
     timestamp: new Date().toISOString()
@@ -148,6 +151,9 @@ const startServer = async () => {
     await prisma.$connect();
     console.log('PostgreSQL Connected via Prisma');
 
+    await connectRedis();
+    initRealtimeSubscriber();
+
     await resumeStuckEvaluations();
 
     const server = app.listen(port, () => {
@@ -163,14 +169,15 @@ const startServer = async () => {
       }, 10000);
 
       server.close(async (err) => {
-        console.log('HTTP server closed. Disconnecting databases...');
+        console.log('HTTP server closed. Disconnecting databases and caches...');
         try {
           await disconnectMongoDB();
           await prisma.$disconnect();
-          console.log('Databases disconnected successfully.');
+          await disconnectRedis();
+          console.log('Databases and caches disconnected successfully.');
           process.exit(err ? 1 : 0);
         } catch (dbError) {
-          console.error('Error during database disconnection:', dbError);
+          console.error('Error during disconnection:', dbError);
           process.exit(1);
         }
       });
@@ -186,5 +193,7 @@ const startServer = async () => {
 };
 
 startServer();
+
+export default app;
 
 export default app;

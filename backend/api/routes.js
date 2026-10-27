@@ -30,6 +30,7 @@ import {
   submitApplication,
   decisionApplication
 } from '../src/controllers/applicationController.js';
+import { handleSseSubscription } from '../src/services/realtimeService.js';
 
 const router = Router();
 
@@ -44,6 +45,11 @@ router.get('/health', (req, res) => {
     timestamp: new Date().toISOString()
   });
 });
+
+// ==========================================
+// Real-Time Event Stream (SSE) (Issue #118, #32)
+// ==========================================
+router.get('/events/subscribe', handleSseSubscription);
 
 // ==========================================
 // Auth & RBAC Routes (with loginLimiter)
