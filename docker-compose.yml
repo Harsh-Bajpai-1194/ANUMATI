@@ -93,7 +93,7 @@ services:
     networks:
       - anumati-internal  # Isolated internally from public web
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/docs"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -129,6 +129,11 @@ services:
     networks:
       - anumati-public
       - anumati-internal
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:5000/health').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # -----------------------------------------------------------
   # Web Client: React 18 / Nginx Frontend
@@ -144,4 +149,6 @@ services:
     ports:
       - "3000:80"
     networks:
+      - anumati-public
+
       - anumati-public
