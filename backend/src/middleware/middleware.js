@@ -2,6 +2,55 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
+import rateLimit from 'express-rate-limit';
+
+// ============================================================================
+// Gateway Rate Limiters (Issue #117)
+// ============================================================================
+
+/**
+ * Strict Rate Limiter for Authentication endpoints (/auth/login)
+ * Mitigates credential stuffing and brute-force attacks.
+ */
+export const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10, // Max 10 attempts per IP per 15 minutes
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: 'Too many login attempts from this IP. Please try again after 15 minutes.'
+  }
+});
+
+/**
+ * Upload Throttling Limiter for Document endpoints (/documents/upload)
+ * Prevents DoS bottlenecks and abuse through high-volume PDF uploads.
+ */
+export const uploadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 20, // Max 20 file uploads per IP per 15 minutes
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: 'Upload rate limit exceeded. Please try again after 15 minutes.'
+  }
+});
+
+/**
+ * Global API Gateway Rate Limiter
+ */
+export const apiGatewayLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 150, // 150 requests per IP per 15 minutes
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: 'API rate limit exceeded. Please slow down and try again later.'
+  }
+});
 
 // Ensure the upload directory exists.
 const uploadDir = path.resolve('uploads');
@@ -38,6 +87,24 @@ export const uploadPdf = multer({
     fileSize: 15 * 1024 * 1024 // 15 Megabytes
   }
 });
+
+export const handleMulterUpload = (uploadMiddleware) => (req, res, next) => {
+  uploadMiddleware(req, res, (err) => {
+    if (err) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(413).json({
+          success: false,
+          message: 'Payload too large: PDF file exceeds the 15MB gateway limit.'
+        });
+      }
+      return res.status(400).json({
+        success: false,
+        message: err.message || 'File upload error.'
+      });
+    }
+    next();
+  });
+};
 
 /**
  * Safely removes rejected files from disk, logging non-ENOENT errors.

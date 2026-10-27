@@ -8,7 +8,7 @@ from pathlib import Path
 import tempfile
 import asyncio
 
-from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form, Header
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from src.config import UPLOAD_FOLDER
@@ -20,7 +20,7 @@ from src.signature.signature_detector import SignatureDetector
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("anumati-ml")
 
-# Internal Shared Secret Authentication (Issue #83, CodeRabbit CWE-1392)
+# Internal Shared Secret Authentication (Issue #83, #117)
 ENVIRONMENT = os.getenv("ENV", os.getenv("ENVIRONMENT", os.getenv("NODE_ENV", ""))).lower()
 IS_EXPLICIT_DEV = ENVIRONMENT in ("development", "dev", "local", "test")
 
@@ -44,21 +44,23 @@ if not ML_INTERNAL_TOKEN.isascii():
 app = FastAPI(
     title="ANUMATI ML & Document Evaluation Microservice",
     version="1.2.0",
-    description="Microservice for document classification, OCR extraction, AICTE compliance verification, and signature detection."
+    description="Internal microservice for document classification, OCR extraction, AICTE compliance verification, and signature detection."
 )
+
+# Gatekeeping: ML service is strictly internal; restrict CORS to backend service origins
+ALLOWED_ORIGINS = [
+    "http://backend:5000",
+    "http://localhost:5000",
+    "http://127.0.0.1:5000"
+]
+if IS_EXPLICIT_DEV:
+    ALLOWED_ORIGINS.extend(["http://localhost:3000", "http://127.0.0.1:3000"])
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:8080",
-        "http://localhost:5000",
-        "http://localhost:3000",
-        "http://127.0.0.1:8080",
-        "http://127.0.0.1:5000",
-        "http://127.0.0.1:3000",
-    ],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -70,12 +72,31 @@ document_classifier = DocumentClassifier()
 signature_detector = SignatureDetector()
 
 
+def verify_internal_token(
+    x_internal_token: Optional[str] = Header(None, alias="X-Internal-Token"),
+    x_api_key: Optional[str] = Header(None, alias="X-API-Key")
+) -> str:
+    """Enforces constant-time internal API token validation for gatekeeping."""
+    token = x_internal_token or x_api_key
+    if (
+        not token
+        or not token.isascii()
+        or not secrets.compare_digest(token, ML_INTERNAL_TOKEN)
+    ):
+        raise HTTPException(
+            status_code=401,
+            detail="Unauthorized: Missing or invalid internal token/API key."
+        )
+    return token
+
+
 class EvaluationRequest(BaseModel):
     filePath: Optional[str] = None
     documentId: Optional[str] = None
     targetAcademicYear: Optional[str] = None
 
 
+# Load Balancer Health Check (Liveness Probe)
 @app.get("/health")
 def health_check():
     return {
@@ -84,6 +105,25 @@ def health_check():
         "version": "1.2.0",
         "pipeline_ready": True
     }
+
+
+# Load Balancer Readiness Check (Readiness Probe)
+@app.get("/ready")
+def readiness_check():
+    pipeline_ok = verification_pipeline is not None
+    classifier_ok = document_classifier is not None
+    detector_ok = signature_detector is not None
+
+    if pipeline_ok and classifier_ok and detector_ok:
+        return {
+            "status": "ready",
+            "components": {
+                "verification_pipeline": "ready",
+                "document_classifier": "ready",
+                "signature_detector": "ready"
+            }
+        }
+    raise HTTPException(status_code=503, detail="Service components not fully initialized")
 
 
 def execute_evaluation(
@@ -202,11 +242,6 @@ def _read_file_sync(target_path: Path) -> bytes:
         return f.read()
 
 def build_safe_target_path(path_str: str) -> Path:
-    """
-    Validate and resolve a user-supplied file path strictly inside
-    UPLOAD_FOLDER.
-    """
-
     if not isinstance(path_str, str) or not path_str.strip():
         raise HTTPException(
             status_code=400,
@@ -215,43 +250,20 @@ def build_safe_target_path(path_str: str) -> Path:
 
     raw_path = path_str.strip()
 
-    # Reject null-byte injection.
     if "\x00" in raw_path:
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid file path."
-        )
+        raise HTTPException(status_code=400, detail="Invalid file path.")
 
-    # Reject parent-directory traversal before path resolution.
-    # Handles both Unix and Windows separators.
     path_parts = raw_path.replace("\\", "/").split("/")
-
     if ".." in path_parts:
-        raise HTTPException(
-            status_code=403,
-            detail="Security Error: Path traversal is not allowed."
-        )
+        raise HTTPException(status_code=403, detail="Security Error: Path traversal is not allowed.")
 
-    # Resolve the trusted security boundary.
-    upload_root = os.path.abspath(
-        os.path.realpath(os.fspath(UPLOAD_FOLDER))
-    )
+    upload_root = os.path.abspath(os.path.realpath(os.fspath(UPLOAD_FOLDER)))
+    candidate_path = os.path.abspath(os.path.join(upload_root, raw_path))
+    candidate_path = os.path.abspath(os.path.realpath(candidate_path))
 
-    # Construct the candidate relative to the trusted root.
-    candidate_path = os.path.abspath(
-        os.path.join(upload_root, raw_path)
-    )
-
-    # Resolve symlinks before the boundary check.
-    candidate_path = os.path.abspath(
-        os.path.realpath(candidate_path)
-    )
-
-    # Normalize case on case-insensitive systems.
     normalized_root = os.path.normcase(upload_root)
     normalized_candidate = os.path.normcase(candidate_path)
 
-    # Require the candidate to be strictly inside UPLOAD_FOLDER.
     if (
         normalized_candidate == normalized_root
         or not normalized_candidate.startswith(normalized_root + os.sep)
@@ -270,19 +282,8 @@ async def evaluate_document(
     filename: Optional[str] = Form(None),
     filePath: Optional[str] = Form(None),
     targetAcademicYear: Optional[str] = Form(None),
-    x_internal_token: Optional[str] = Header(None, alias="X-Internal-Token")
+    _token: str = Depends(verify_internal_token)
 ):
-    # Constant-time comparison & ASCII check to prevent timing attacks and 500s (Issue #83, CodeRabbit)
-    if (
-        not x_internal_token
-        or not x_internal_token.isascii()
-        or not secrets.compare_digest(x_internal_token, ML_INTERNAL_TOKEN)
-    ):
-        raise HTTPException(
-            status_code=401,
-            detail="Unauthorized: Missing or invalid X-Internal-Token header."
-        )
-
     try:
         content_type = request.headers.get("content-type", "")
         if "application/json" in content_type:

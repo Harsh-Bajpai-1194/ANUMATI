@@ -1,0 +1,153 @@
+networks:
+  anumati-public:
+    driver: bridge
+  anumati-internal:
+    driver: bridge
+    internal: true  # ML microservice is isolated and unreachable from the host/public web
+
+volumes:
+  postgres_data:
+  mongo_data:
+  redis_data:
+  backend_uploads:
+
+services:
+  # -----------------------------------------------------------
+  # Relational Database: PostgreSQL (Prisma ORM)
+  # -----------------------------------------------------------
+  postgres:
+    image: postgres:15-alpine
+    container_name: anumati-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-anumati_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-anumati_password}
+      POSTGRES_DB: ${POSTGRES_DB:-anumati_db}
+    ports:
+      # Bound to loopback interface for security
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - anumati-public
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-anumati_user} -d ${POSTGRES_DB:-anumati_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # -----------------------------------------------------------
+  # Document Database: MongoDB (Dynamic Forms & AI Reports)
+  # -----------------------------------------------------------
+  mongodb:
+    image: mongo:6.0
+    container_name: anumati-mongo
+    restart: unless-stopped
+    ports:
+      # Bound to loopback interface for security
+      - "127.0.0.1:27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - anumati-public
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # -----------------------------------------------------------
+  # In-Memory Cache: Redis
+  # -----------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: anumati-redis
+    restart: unless-stopped
+    ports:
+      # Bound to loopback interface for security
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - anumati-public
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # -----------------------------------------------------------
+  # AI/ML Microservice (FastAPI + PyMuPDF + Tesseract)
+  # -----------------------------------------------------------
+  ml-service:
+    build:
+      context: ./ml
+      dockerfile: Dockerfile
+    container_name: anumati-ml-service
+    restart: unless-stopped
+    environment:
+      - ENV=production
+      - ML_INTERNAL_TOKEN=${ML_INTERNAL_TOKEN:-anumati_ml_production_internal_secret_2026}
+    expose:
+      - "8000"
+    networks:
+      - anumati-internal  # Isolated internally from public web
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # -----------------------------------------------------------
+  # Application Gateway: Express.js Backend
+  # -----------------------------------------------------------
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: anumati-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      ml-service:
+        condition: service_healthy
+    ports:
+      - "5000:5000"
+    environment:
+      - PORT=5000
+      - NODE_ENV=production
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
+      - DATABASE_URL=${DATABASE_URL:-postgresql://${POSTGRES_USER:-anumati_user}:${POSTGRES_PASSWORD:-anumati_password}@postgres:5432/${POSTGRES_DB:-anumati_db}?schema=public}
+      - MONGODB_URI=mongodb://mongodb:27017/anumati_mongo
+      - ML_SERVICE_URL=http://ml-service:8000
+      - ML_INTERNAL_TOKEN=${ML_INTERNAL_TOKEN:-anumati_ml_production_internal_secret_2026}
+      - JWT_SECRET=${JWT_SECRET:-anumati_backend_jwt_production_secret_2026}
+    volumes:
+      - backend_uploads:/app/uploads
+    networks:
+      - anumati-public
+      - anumati-internal
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:5000/health').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # -----------------------------------------------------------
+  # Web Client: React 18 / Nginx Frontend
+  # -----------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: anumati-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "3000:80"
+    networks:
+      - anumati-public
