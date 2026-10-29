@@ -1,4 +1,6 @@
 import prisma from '../config/db.js';
+import { getCached, setCached, deleteCached } from '../config/redis.js';
+import { broadcastStatusTransition } from '../services/realtimeService.js';
 
 export const createApplication = async (req, res) => {
   try {
@@ -8,7 +10,7 @@ export const createApplication = async (req, res) => {
       return res.status(403).json({ success: false, message: 'Cannot create application for another institution' });
     }
 
-    // CodeRabbit Fix: Use Prisma transaction to ensure atomicity
+    // Use Prisma transaction to ensure atomicity
     const application = await prisma.$transaction(async (tx) => {
       const newApp = await tx.application.create({
         data: {
@@ -30,6 +32,14 @@ export const createApplication = async (req, res) => {
       return newApp;
     });
 
+    // Real-Time Broadcast: Application created (Draft)
+    await broadcastStatusTransition({
+      type: 'STATUS_TRANSITION',
+      applicationId: application.applicationId,
+      status: 'Draft',
+      message: 'New application initiated in Draft status.'
+    });
+
     res.status(201).json({ success: true, application });
   } catch (error) {
     if (error.code === 'P2002') {
@@ -48,6 +58,7 @@ export const listApplications = async (req, res) => {
     if (req.user.role === 'applicant') {
       where.institutionId = req.user.institutionId;
     }
+
     if (status) {
       where.currentStatus = status;
     }
@@ -67,10 +78,25 @@ export const listApplications = async (req, res) => {
   }
 };
 
+/**
+ * Get Application by ID with Redis Caching (Issue #118)
+ */
 export const getApplicationById = async (req, res) => {
   try {
     const { id } = req.params;
+    const cacheKey = `cache:app:${id}`;
 
+    // 1. Try to fetch from Redis Cache
+    const cachedApplication = await getCached(cacheKey);
+    if (cachedApplication) {
+      if (req.user.role === 'applicant' && cachedApplication.institutionId !== req.user.institutionId) {
+        return res.status(403).json({ success: false, message: 'Access denied' });
+      }
+      res.setHeader('X-Cache', 'HIT');
+      return res.status(200).json({ success: true, application: cachedApplication });
+    }
+
+    // 2. Cache miss: Query SQL database via Prisma
     const application = await prisma.application.findUnique({
       where: { applicationId: id },
       include: {
@@ -90,6 +116,10 @@ export const getApplicationById = async (req, res) => {
       return res.status(403).json({ success: false, message: 'Access denied' });
     }
 
+    // 3. Store result in Redis with 60-second TTL
+    await setCached(cacheKey, application, 60);
+
+    res.setHeader('X-Cache', 'MISS');
     res.status(200).json({ success: true, application });
   } catch (error) {
     console.error('Get Application Error:', error);
@@ -114,7 +144,7 @@ export const submitApplication = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Application must be in draft or returned_for_correction state to submit' });
     }
 
-    // CodeRabbit Fix: Use Prisma transaction to ensure atomicity
+    // Use Prisma transaction to ensure atomicity
     const updatedApp = await prisma.$transaction(async (tx) => {
       const app = await tx.application.update({
         where: { applicationId: id },
@@ -134,6 +164,17 @@ export const submitApplication = async (req, res) => {
       });
 
       return app;
+    });
+
+    // Invalidate Redis Cache on mutation
+    await deleteCached(`cache:app:${id}`);
+
+    // Real-Time Broadcast: Application Submitted
+    await broadcastStatusTransition({
+      type: 'STATUS_TRANSITION',
+      applicationId: id,
+      status: 'Submitted',
+      message: 'Application submitted for institutional verification.'
     });
 
     res.status(200).json({ success: true, application: updatedApp });
@@ -157,12 +198,11 @@ export const decisionApplication = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Application not found' });
     }
 
-    // CodeRabbit Fix: Enforce allowed status transition
     if (application.currentStatus !== 'submitted') {
       return res.status(400).json({ success: false, message: 'Only submitted applications can receive a decision' });
     }
 
-    // CodeRabbit Fix: Use Prisma transaction to ensure atomicity
+    // Use Prisma transaction to ensure atomicity
     const updatedApp = await prisma.$transaction(async (tx) => {
       const app = await tx.application.update({
         where: { applicationId: id },
@@ -181,6 +221,21 @@ export const decisionApplication = async (req, res) => {
       });
 
       return app;
+    });
+
+    // Invalidate Redis Cache on mutation
+    await deleteCached(`cache:app:${id}`);
+
+    // Map internal decision enum to user-facing status label
+    const statusLabel = decision === 'approved' ? 'Approved' : decision === 'rejected' ? 'Rejected' : 'Returned for Correction';
+
+    // Real-Time Broadcast: Application Decision
+    await broadcastStatusTransition({
+      type: 'STATUS_TRANSITION',
+      applicationId: id,
+      status: statusLabel,
+      decision,
+      message: `Application decision updated to ${statusLabel}.`
     });
 
     res.status(200).json({ success: true, application: updatedApp });

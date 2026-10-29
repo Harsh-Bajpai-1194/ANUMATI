@@ -109,7 +109,7 @@ const runVerification = async () => {
     try {
       await parseAndStoreAiReport(testAppId, {});
     } catch (err) {
-      if (err.message.includes('Missing required')) {
+      if (err.message.includes('Missing required') || err.message.includes('Contract Violation')) {
         incompleteRejected = true;
         console.log(`   ✓ Properly rejected empty report: "${err.message}"`);
       } else {

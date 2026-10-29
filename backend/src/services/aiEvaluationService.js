@@ -2,8 +2,45 @@ import fs from 'fs';
 import path from 'path';
 import AiEvaluation from '../models/AiEvaluation.js';
 import { ML_INTERNAL_TOKEN } from '../config/auth.js';
+import { getCached, setCached, deleteCached } from '../config/redis.js';
 
 const VALID_SEVERITIES = new Set(['low', 'medium', 'high', 'critical']);
+
+/**
+ * Strict JSON Contract Validator (Issue #117)
+ * Validates the verification report schema returned by FastAPI before storing in MongoDB.
+ */
+export const validateAiReportContract = (rawReport) => {
+  if (!rawReport || typeof rawReport !== 'object' || Array.isArray(rawReport)) {
+    throw new Error('Contract Violation: Verification report must be a non-null JSON object.');
+  }
+
+  if (rawReport.status && !['completed', 'success'].includes(String(rawReport.status).toLowerCase())) {
+    throw new Error(`Contract Violation: Incomplete evaluation status "${rawReport.status}".`);
+  }
+
+  const hasExtraction = Boolean(rawReport.textExtraction || rawReport.extractedTextMetadata);
+  const hasAnomaly = Boolean(rawReport.anomalyDetection);
+
+  if (!hasExtraction && !hasAnomaly) {
+    throw new Error('Contract Violation: Missing required text extraction or anomaly detection fields.');
+  }
+
+  if (rawReport.anomalyDetection) {
+    if (typeof rawReport.anomalyDetection !== 'object' || Array.isArray(rawReport.anomalyDetection)) {
+      throw new Error('Contract Violation: "anomalyDetection" must be an object.');
+    }
+    if (rawReport.anomalyDetection.flags && !Array.isArray(rawReport.anomalyDetection.flags)) {
+      throw new Error('Contract Violation: "anomalyDetection.flags" must be an array.');
+    }
+  }
+
+  if (rawReport.complianceScore !== undefined && typeof rawReport.complianceScore !== 'number') {
+    throw new Error('Contract Violation: "complianceScore" must be a numeric value.');
+  }
+
+  return true;
+};
 
 const normalizeFlags = (rawFlags = []) => {
   if (!Array.isArray(rawFlags)) return [];
@@ -43,20 +80,8 @@ export const resolveIdentifiers = (identifiers) => {
 export const parseAndStoreAiReport = async (identifiers, rawReport) => {
   const { applicationId, documentId } = resolveIdentifiers(identifiers);
 
-  if (!rawReport || typeof rawReport !== 'object' || Array.isArray(rawReport)) {
-    throw new Error('A valid JSON report object is required.');
-  }
-
-  if (rawReport.status && rawReport.status !== 'completed' && rawReport.status !== 'success') {
-    throw new Error(`Cannot store evaluation with incomplete status: "${rawReport.status}".`);
-  }
-
-  const hasExtraction = Boolean(rawReport.textExtraction || rawReport.extractedTextMetadata);
-  const hasAnomaly = Boolean(rawReport.anomalyDetection);
-
-  if (!hasExtraction && !hasAnomaly) {
-    throw new Error('Invalid evaluation report: Missing required text extraction and anomaly detection fields.');
-  }
+  // Enforce JSON Schema Contract before persisting
+  validateAiReportContract(rawReport);
 
   const ocrConfidenceScore =
     rawReport.textExtraction?.ocrConfidenceScore ??
@@ -98,11 +123,19 @@ export const parseAndStoreAiReport = async (identifiers, rawReport) => {
   const savedRecord = await evaluationDocument.save();
   const targetLabel = applicationId ? `application ${applicationId}` : `document ${documentId}`;
   console.log(`[AI Evaluation Service] Report saved for ${targetLabel} (Mongo ID: ${savedRecord._id})`);
+
+  // Invalidate Redis caches for this evaluation summary (Issue #118)
+  if (applicationId) {
+    await deleteCached(`cache:ai_eval:app:${applicationId}`);
+  }
+  if (documentId) {
+    await deleteCached(`cache:ai_eval:doc:${documentId}`);
+  }
+
   return savedRecord;
 };
 
 export const dispatchAiEvaluation = async (identifiers, filePath) => {
-  // Validate and resolve identifiers before reading the file or making network calls (CodeRabbit review)
   const { applicationId, documentId } = resolveIdentifiers(identifiers);
 
   const absolutePath = path.resolve(filePath);
@@ -117,7 +150,6 @@ export const dispatchAiEvaluation = async (identifiers, filePath) => {
 
   console.log(`[ML Dispatcher] Sending ${targetLabel} (${fileName}) to ML Service at ${mlServiceUrl}/evaluate...`);
 
-  // Stream PDF directly as Blob to avoid buffering entire file into memory (CodeRabbit review)
   const fileBlob = await fs.openAsBlob(absolutePath, { type: 'application/pdf' });
   const formData = new FormData();
   formData.append('file', fileBlob, fileName);
@@ -129,7 +161,8 @@ export const dispatchAiEvaluation = async (identifiers, filePath) => {
     const response = await fetch(`${mlServiceUrl}/evaluate`, {
       method: 'POST',
       headers: {
-        'X-Internal-Token': ML_INTERNAL_TOKEN
+        'X-Internal-Token': ML_INTERNAL_TOKEN,
+        'X-API-Key': ML_INTERNAL_TOKEN
       },
       body: formData,
       signal: controller.signal
@@ -154,14 +187,42 @@ export const dispatchAiEvaluation = async (identifiers, filePath) => {
   }
 };
 
+/**
+ * Get AI Evaluation by Application ID with Redis Caching (Issue #118)
+ */
 export const getAiEvaluationByApplicationId = async (applicationId) => {
   if (!applicationId) throw new Error('applicationId parameter is required.');
-  return await AiEvaluation.find({ applicationId }).sort({ createdAt: -1 }).lean();
+
+  const cacheKey = `cache:ai_eval:app:${applicationId}`;
+  const cached = await getCached(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const records = await AiEvaluation.find({ applicationId }).sort({ createdAt: -1 }).lean();
+  if (records && records.length > 0) {
+    await setCached(cacheKey, records, 120); // 120 seconds TTL
+  }
+  return records;
 };
 
+/**
+ * Get AI Evaluation by Document ID with Redis Caching (Issue #118)
+ */
 export const getAiEvaluationByDocumentId = async (documentId) => {
   if (!documentId) throw new Error('documentId parameter is required.');
-  return await AiEvaluation.find({ documentId }).sort({ createdAt: -1 }).lean();
+
+  const cacheKey = `cache:ai_eval:doc:${documentId}`;
+  const cached = await getCached(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const records = await AiEvaluation.find({ documentId }).sort({ createdAt: -1 }).lean();
+  if (records && records.length > 0) {
+    await setCached(cacheKey, records, 120);
+  }
+  return records;
 };
 
 export const getAiEvaluationById = async (id) => {

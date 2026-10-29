@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   # ==========================================
   # 1. ML Microservice Job (Python 3.11 + Pytest)
@@ -94,7 +97,7 @@ jobs:
           ML_INTERNAL_TOKEN: "dev-secret-internal-token-change-in-production"
 
   # ==========================================
-  # 3. Frontend Job (Node 20 + Webpack Build)
+  # 3. Frontend Job (Node 24 + Webpack Build)
   # ==========================================
   frontend:
     name: Frontend Build
@@ -107,10 +110,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Node.js 20
+      - name: Set up Node.js 24
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
@@ -119,4 +122,41 @@ jobs:
 
       - name: Build frontend production bundle
         run: npm run build
-        
+
+  # ==========================================
+  # 4. Docker Build & Compose Validation Job
+  # ==========================================
+  docker:
+    name: Docker Build & Compose Validation
+    runs-on: ubuntu-latest
+    needs: [ml, backend, frontend]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: actions/setup-buildx-action@v3
+
+      - name: Validate docker-compose syntax & configs
+        run: docker compose config
+        env:
+          ML_INTERNAL_TOKEN: "ci_pipeline_production_ml_secret_token_2026"
+          JWT_SECRET: "ci_pipeline_production_jwt_secret_token_2026"
+
+      - name: Build all Docker service images
+        run: docker compose build --parallel
+
+      - name: Spin up multi-container stack & check health
+        run: |
+          docker compose up -d --wait --wait-timeout 180
+          docker compose ps
+        env:
+          ML_INTERNAL_TOKEN: "ci_pipeline_production_ml_secret_token_2026"
+          JWT_SECRET: "ci_pipeline_production_jwt_secret_token_2026"
+
+      - name: Teardown Docker stack
+        if: always()
+        run: docker compose down -v
+
+        run: docker compose down -v
