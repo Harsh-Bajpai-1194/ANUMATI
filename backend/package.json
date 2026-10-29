@@ -2,10 +2,10 @@
   "name": "anumati-backend",
   "version": "1.0.0",
   "description": "Backend and Database Service for ANUMATI project",
-  "main": "server.js",
+  "main": "src/server.js",
   "type": "module",
   "scripts": {
-    "start": "node server.js",
+    "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",

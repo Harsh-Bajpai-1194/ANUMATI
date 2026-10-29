@@ -154,5 +154,3 @@ services:
       - "3000:80"
     networks:
       - anumati-public
-
-      - anumati-public

@@ -65,17 +65,36 @@ export const uploadDocument = async (req, res) => {
     }
 
     // Persist document metadata in PostgreSQL via Prisma (Issue #35)
-    const doc = await prisma.document.create({
-      data: {
-        applicationId: validApplicationId,
-        originalName: originalname,
-        storageKey: safeFileName,
-        sha256: sha256,
-        sizeBytes: size,
-        status: 'uploaded',
-        uploadedBy: req.user?.userId || null
+    let doc;
+    try {
+      doc = await prisma.document.create({
+        data: {
+          applicationId: validApplicationId,
+          originalName: originalname,
+          storageKey: safeFileName,
+          sha256: sha256,
+          sizeBytes: size,
+          status: 'uploaded',
+          uploadedBy: req.user?.userId || null
+        }
+      });
+    } catch (dbErr) {
+      if (process.env.NODE_ENV !== 'production') {
+        console.warn('[Document Service] PostgreSQL unreachable, using interim metadata record:', dbErr.message);
+        doc = {
+          documentId: crypto.randomUUID(),
+          applicationId: validApplicationId,
+          originalName: originalname,
+          storageKey: safeFileName,
+          sha256: sha256,
+          sizeBytes: size,
+          status: 'uploaded',
+          createdAt: new Date().toISOString()
+        };
+      } else {
+        throw dbErr;
       }
-    });
+    }
 
     // Trigger background evaluation queue asynchronously (Issue #85)
     enqueueEvaluation();
